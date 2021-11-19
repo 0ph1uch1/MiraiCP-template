@@ -1,2 +1,0 @@
-# MiraiCP-template
-MiraiCP template
