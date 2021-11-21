@@ -9,9 +9,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 声明C++项目
 project(MiraiCP LANGUAGES CXX)
-# 在64位编译
-set(BUILD_USE_64BITS on)
 # 寻找本地JNI文件
+set(JAVA_AWT_LIBRARY NotNeeded)
+set(JAVA_JVM_LIBRARY NotNeeded)
+set(JAVA_AWT_INCLUDE_PATH NotNeeded)
 find_package(JNI REQUIRED)
 if (JNI_FOUND)
     message (STATUS "FOUND JNI IN ${JAVA_INCLUDE_PATH}")
