@@ -8,5 +8,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Logging
-        run: |
-          echo "${{toJSON(github.event)}}"
+      run: |
+           echo "${{toJSON(github.event)}}"
