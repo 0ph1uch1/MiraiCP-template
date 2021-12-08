@@ -25,7 +25,7 @@ jobs:
                  email: "1930893235@qq.com"
                }
              });
-             github.git.createRef({
+             github.rest.git.createRef({
                      owner: context.repo.owner,
                       repo: context.repo.repo,
                       ref: "refs/tags/${{github.event.head_commit.message}}",
