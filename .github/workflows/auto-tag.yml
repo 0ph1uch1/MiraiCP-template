@@ -18,7 +18,7 @@ jobs:
                repo: context.repo.repo,
                tag: "${{github.event.head_commit.message}}",
                message: "${{github.event.head_commit.message}}",
-               object: ${{ github.sha }},
+               object: "${{ github.sha }}",
                type: "commit",
                tagger: {
                  name: "Eritque arcus",
