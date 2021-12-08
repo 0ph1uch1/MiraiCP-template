@@ -29,6 +29,6 @@ jobs:
                      owner: context.repo.owner,
                       repo: context.repo.repo,
                       ref: "refs/tags/${{github.event.head_commit.message}}",
-                      sha: ${{ github.sha }}
+                      sha: "${{ github.sha }}"
              });
            }
