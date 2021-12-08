@@ -1,0 +1,34 @@
+name: auto tag
+
+on:
+  push:
+    branches: main
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Create tag
+      uses: actions/github-script@v5
+      with:
+       github-token: ${{ github.token }}
+       script: |
+           if("${{github.event.head_commit.message}}".startsWith("v")){
+             github.rest.git.createTag({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               tag: "${{github.event.head_commit.message}}",
+               message: "${{github.event.head_commit.message}}",
+               object: "${{ github.sha }}",
+               type: "commit",
+               tagger: {
+                 name: "Eritque arcus",
+                 email: "1930893235@qq.com"
+               }
+             });
+             github.rest.git.createRef({
+                     owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      ref: "refs/tags/${{github.event.head_commit.message}}",
+                      sha: "${{ github.sha }}"
+             });
+           }
