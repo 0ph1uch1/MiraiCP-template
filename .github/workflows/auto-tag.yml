@@ -10,7 +10,7 @@ jobs:
     - name: Create tag
       uses: actions/github-script@v5
       with:
-       github-token: ${{ secrets.GITHUB_TOKEN }}
+       github-token: ${{ github.token }}
        script: |
            if("${{github.event.head_commit.message}}".startsWith("v")){
              github.rest.git.createTag({
