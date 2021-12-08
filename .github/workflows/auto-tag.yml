@@ -1,6 +1,11 @@
 name: auto tag
 
 on:
+  workflow_dispatch:
+    inputs:
+     v:
+      required: true
+      description: version tag
   push:
     branches: master
 jobs:
