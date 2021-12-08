@@ -1,17 +1,31 @@
 name: auto tag
 
 on:
-  workflow_dispatch:
-    inputs:
-     v:
-      required: true
-      description: version tag
   push:
-    branches: master
+    branches: main
 jobs:
   tag:
     runs-on: ubuntu-latest
     steps:
     - name: Logging
       run: |
-           echo "${{toJSON(github.event)}}"
+           echo "${{github.event.head_commit.message}}"
+    - name: Create tag
+      uses: actions/github-script@v5
+      with:
+       github-token: ${{ secrets.MY_PAT }}
+       script: |
+           if("${{github.event.head_commit.message}}".startsWith("v")){
+             github.rest.git.createTag({
+               owner: context.repo.owner,
+               repo: "MiraiCP-template",
+               tag: "${{github.event.head_commit.message}}",
+               message: "${{github.event.head_commit.message}}",
+               object: ${{ github.event.head_commit.sha }},
+               type: "commit",
+               tagger: {
+                 name: "Eritque arcus",
+                 email: "1930893235@qq.com"
+               }
+             })
+           }
