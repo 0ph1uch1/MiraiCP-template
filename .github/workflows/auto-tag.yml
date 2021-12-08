@@ -33,4 +33,5 @@ jobs:
                     }).catch((error) => {
                       core.setFailed(`Failed tagging ${commit.id}. Reason: ${error}`);
                     });
+                    })
            }
