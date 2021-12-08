@@ -18,7 +18,7 @@ jobs:
                repo: "MiraiCP-template",
                tag: "${{github.event.head_commit.message}}",
                message: "${{github.event.head_commit.message}}",
-               object: ${{ github.event.head_commit.sha }},
+               object: ${{ github.sha }},
                type: "commit",
                tagger: {
                  name: "Eritque arcus",
