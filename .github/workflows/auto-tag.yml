@@ -15,7 +15,7 @@ jobs:
            if("${{github.event.head_commit.message}}".startsWith("v")){
              github.rest.git.createTag({
                owner: context.repo.owner,
-               repo: "MiraiCP-template",
+               repo: context.repo.repo,
                tag: "${{github.event.head_commit.message}}",
                message: "${{github.event.head_commit.message}}",
                object: ${{ github.sha }},
