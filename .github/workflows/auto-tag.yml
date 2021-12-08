@@ -24,14 +24,11 @@ jobs:
                  name: "Eritque arcus",
                  email: "1930893235@qq.com"
                }
-             }).then(() => {
-                    github.git.createRef({
-                      owner: context.repo.owner,
+             });
+             github.git.createRef({
+                     owner: context.repo.owner,
                       repo: context.repo.repo,
-                      ref: `refs/tags/${{github.event.head_commit.message}}`,
-                      sha: ${{ github.sha }},
-                    }).catch((error) => {
-                      core.setFailed(`Failed tagging ${commit.id}. Reason: ${error}`);
-                    });
-                    })
+                      ref: "refs/tags/${{github.event.head_commit.message}}",
+                      sha: ${{ github.sha }}
+             });
            }
