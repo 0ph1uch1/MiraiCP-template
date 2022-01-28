@@ -7,6 +7,8 @@ add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# 解决本地编译放到运行环境出现/usr/lib/x86_64-linux-gnu/libstdc++.so.6: GLIBCXX_3.4.26 not found的问题
+#set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++")  # 编译出来的东西会大一点，默认关闭，适合多服务器。
 # 声明C++项目
 project(MiraiCP LANGUAGES CXX)
 # 寻找本地JNI文件
