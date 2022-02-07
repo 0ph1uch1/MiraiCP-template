@@ -102,9 +102,6 @@ namespace MiraiCP::Config {
 //from Contact.cpp
 namespace MiraiCP {
     using json = nlohmann::json;
-    [[deprecated("Use sendMessage")]] MessageSource Contact::sendMsg(std::vector<std::string> msg, int retryTime, JNIEnv *env) {
-        return sendMsg0(Tools::VectorToString(std::move(msg)), retryTime, false, env);
-    }
     MessageSource Contact::sendMsg0(const std::string &msg, int retryTime, bool miraicode, JNIEnv *env) const {
         if (msg.empty()) {
             MiraiCPThrow(IllegalArgumentException("不能发送空信息, 位置: Contact::SendMsg"));
@@ -131,6 +128,12 @@ namespace MiraiCP {
         if (re == "E2")
             MiraiCPThrow(UploadException("上传图片大小超过30MB,路径:" + path));
         return Image::deserialize(re);
+    }
+    FlashImage Contact::uploadFlashImg(const std::string& path, JNIEnv* env) const {
+        std::string re = LowLevelAPI::uploadImg0(path, this->toString(), env);
+        if (re == "E2")
+            MiraiCPThrow(UploadException("上传图片大小超过30MB,路径:" + path));
+        return FlashImage::deserialize(re);
     }
     Contact Contact::deserialize(const std::string &source) {
         json j;
@@ -169,8 +172,6 @@ namespace MiraiCP {
 namespace MiraiCP {
     using json = nlohmann::json;
     Event Event::processor = Event();
-    /// @deprecated use Event::prcessor, 使用单例模式, since v2.8.1
-    [[deprecated("Use Event::processor instead")]] Event *const procession = &Event::processor;
     void GroupInviteEvent::operation0(const std::string &source, QQID botid, bool accept, JNIEnv *env) {
         nlohmann::json j;
         j["text"] = source;
@@ -346,7 +347,7 @@ namespace MiraiCP {
         j["contactSource"] = this->toString();
         std::string re = Config::koperation(Config::SendNudge, j);
         if (re == "E1")
-            MiraiCPThrow(IllegalStateException("发送戳一戳失败，登录协议不为phone"));
+            MiraiCPThrow(IllegalStateException("发送戳一戳失败，登录协议不为phone/ipad"));
     }
 } // namespace MiraiCP
 //from Group.cpp
@@ -543,8 +544,6 @@ namespace MiraiCP {
     using json = nlohmann::json;
     // 静态成员
     Logger Logger::logger = Logger();
-    /// @deprecated use Logger::logger, 用单例模式, since v2.8.1
-    [[deprecated("Use Logger::logger instead")]] Logger *const logger = &Logger::logger;
     // 结束静态成员
     /*
     日志类实现
@@ -695,9 +694,6 @@ namespace MiraiCP {
 //from MessageChain.cpp
 namespace MiraiCP {
     using json = nlohmann::json;
-    void MessageChain::Message::tempThrow(const std::string &x) const {
-        MiraiCPThrow(IllegalArgumentException(x));
-    }
     std::string MessageChain::toMiraiCode() const {
         return Tools::VectorToString(this->toMiraiCodeVector(), "");
     }
@@ -765,6 +761,15 @@ namespace MiraiCP {
                     case 7:
                         mc.add(Face(std::stoi(tmp.substr(i + 1, tmp.length() - i - 1))));
                         break;
+                    case 8:
+                        mc.add(FlashImage(tmp.substr(i + 1, tmp.length() - i - 1)));
+                        break;
+                    case 9: {
+                        //[mirai:musicshare:name,title,summary,jUrl,pUrl,mUrl,brief]
+                        auto temp = Tools::split(tmp.substr(i + 1, tmp.length() - i - 1), ",");
+                        mc.add(MusicShare(temp[0], temp[1], temp[2], temp[3], temp[4], temp[5], temp[6]));
+                        break;
+                    }
                     default:
                         Logger::logger.error(
                                 "MiraiCP碰到了意料之中的错误(原因:部分SimpleMessage在MiraiCode解析支持之外)\n请到MiraiCP(github.com/Nambers/MiraiCP)发送issue并复制本段信息使MiraiCP可以支持这种消息: MiraiCode:" +
@@ -790,6 +795,10 @@ namespace MiraiCP {
         MessageChain mc;
         if (j.empty()) return mc;
         if (j[0]["type"] == "MessageOrigin") {
+            if (j[0]["kind"] == "MUSIC_SHARE") {
+                mc.add(MusicShare(j[1]["kind"], j[1]["title"], j[1]["summary"], j[1]["jumpUrl"], j[1]["pictureUrl"], j[1]["musicUrl"], j[1]["brief"]));
+                return mc;
+            }
             mc.add(OnlineForwardedMessage::deserializationFromMessageSourceJson(j));
             return mc;
         }
@@ -834,11 +843,14 @@ namespace MiraiCP {
                 case 7:
                     mc.add(Face(node["id"]));
                     break;
+                case 8:
+                    mc.add(FlashImage(node["imageId"]));
+                    break;
                 default:
                     Logger::logger.error(
                             "MiraiCP碰到了意料之中的错误(原因:接受到的SimpleMessage在MessageSource解析支持之外)\n请到MiraiCP(github.com/Nambers/MiraiCP)发送issue并复制本段信息使MiraiCP可以支持这种消息: MessageSource:" +
                             j.dump());
-                    mc.add(UnSupportMessage(node["content"]));
+                    mc.add(UnSupportMessage(node.dump()));
             }
         }
         return mc;
@@ -874,28 +886,6 @@ namespace MiraiCP {
             Logger::logger.error(e.what());
             MiraiCPThrow(IllegalArgumentException(std::string("消息源序列化出错，格式不符合(MessageSource::deserializeFromString), ") + e.what()));
         }
-    }
-    MessageSource MessageSource::quoteAndSendMiraiCode(const std::string &content, QQID groupid, JNIEnv *env) const {
-        json obj;
-        json sign;
-        obj["messageSource"] = this->serializeToString();
-        obj["msg"] = content;
-        sign["MiraiCode"] = true;
-        sign["groupid"] = groupid;
-        obj["sign"] = sign.dump();
-        std::string re = Config::koperation(Config::SendWithQuote, obj, env);
-        return MessageSource::deserializeFromString(re);
-    }
-    MessageSource MessageSource::quoteAndSendMsg(const std::string &content, QQID groupid, JNIEnv *env) const {
-        json obj;
-        json sign;
-        obj["messageSource"] = this->serializeToString();
-        obj["msg"] = content;
-        sign["MiraiCode"] = false;
-        sign["groupid"] = groupid;
-        obj["sign"] = sign.dump();
-        std::string re = Config::koperation(Config::SendWithQuote, obj, env);
-        return MessageSource::deserializeFromString(re);
     }
 } // namespace MiraiCP
 //from MiraiCode.cpp
@@ -941,7 +931,9 @@ namespace MiraiCP {
             {4, "app"},
             {5, "service"},
             {6, "file"},
-            {7, "face"}};
+            {7, "face"},
+            {8, "FlashImage"},
+            {9, "MusicShare"}};
     QuoteReply::QuoteReply(const SingleMessage &m) : SingleMessage(m) {
         if (m.type != -2) MiraiCPThrow(IllegalArgumentException("cannot convert type(" + std::to_string(m.type) + "to QuoteReply"));
         source = MessageSource::deserializeFromString(m.content);
@@ -960,7 +952,7 @@ namespace MiraiCP {
         return -1;
     }
     std::string SingleMessage::toMiraiCode() const {
-        Logger::logger.info("base");
+        // Logger::logger.info("base");
         if (type > 0)
             if (type == 1)
                 return "[mirai:at:" + content + "] ";
@@ -1005,7 +997,7 @@ namespace MiraiCP {
         return j;
     }
     Image::Image(const SingleMessage &sg) : SingleMessage(sg) {
-        if (sg.type != 2) MiraiCPThrow(IllegalArgumentException("传入的SingleMessage应该是Image类型"));
+        if (sg.type != 3 && sg.type != 8) MiraiCPThrow(IllegalArgumentException("传入的SingleMessage应该是Image类型"));
         this->id = sg.content;
         this->size = this->width = this->height = 0;
         this->imageType = 5;
@@ -1017,6 +1009,16 @@ namespace MiraiCP {
         tmp["botid"] = botid;
         std::string re = Config::koperation(Config::ImageUploaded, tmp, env);
         return re == "true";
+    }
+    nlohmann::json FlashImage::toJson() const {
+        nlohmann::json j;
+        j["key"] = "Flashimage";
+        j["imageid"] = this->id;
+        j["size"] = this->size;
+        j["width"] = this->width;
+        j["height"] = this->height;
+        j["type"] = this->imageType;
+        return j;
     }
     nlohmann::json LightApp::toJson() const {
         nlohmann::json j;
@@ -1171,6 +1173,15 @@ namespace MiraiCP {
                 j["height"],
                 j["type"]);
     }
+    FlashImage FlashImage::deserialize(const std::string& str) {
+        json j = json::parse(str);
+        return FlashImage(
+                j["imageid"],
+                j["size"],
+                j["width"],
+                j["height"],
+                j["type"]);
+    }
 } // namespace MiraiCP//from ThreadManager.cpp
 namespace MiraiCP {
     // 静态成员
@@ -1258,7 +1269,7 @@ namespace MiraiCP::Tools {
         }
         return env->NewString((jchar *) c, (jsize) utf16line.size());
     }
-    std::string replace(std::string str, const std::string &from, const std::string &to) {
+    std::string replace(std::string str, std::string_view from, std::string_view to) {
         size_t start_pos = 0;
         while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
             str.replace(start_pos, from.length(), to);
@@ -1304,25 +1315,20 @@ namespace MiraiCP::Tools {
                                "]", "\\]"),
                        "[", "\\[");
     }
-    bool starts_with(const std::string &f, const std::string &s) { return f.rfind(s, 0) == 0; }
-    bool icompareChar(char &c1, char &c2) {
+    bool starts_with(std::string_view f, std::string_view s) { return f.rfind(s, 0) == 0; }
+    bool icompareChar(const char &c1, const char &c2) {
         return c1 == c2 || std::toupper(c1) == std::toupper(c2);
     }
-    bool iequal(std::string str1, std::string str2) {
+    bool iequal(std::string_view str1, std::string_view str2) {
         return ((str1.size() == str2.size()) &&
                 std::equal(str1.begin(), str1.end(), str2.begin(), &icompareChar));
     }
+    std::vector<std::string> split(const std::string &text, const std::string &delim) {
+        std::regex ws_re(delim + "+");
+        return {std::sregex_token_iterator(text.begin(), text.end(), ws_re, -1), std::sregex_token_iterator()};
+    }
 } // namespace MiraiCP::Tools
 //from utils.cpp
-namespace MiraiCP {
-    // env nullable, handle in kOperation
-    inline void schedule(long time, const std::string &msg, JNIEnv *env) {
-        nlohmann::json j;
-        j["time"] = time;
-        j["msg"] = msg;
-        Config::koperation(Config::TimeOut, j, env);
-    }
-} // namespace MiraiCP
 // 开始对接JNI接口代码
 /*
 * 名称:Java_com_example_plugin_CPP_1lib_Verify
@@ -1392,11 +1398,10 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
         return returnNull();
     }
     int type = j["type"].get<int>();
-    // type == 17 is command
-    if (type != 17 && Event::processor.eventNodes()[type - static_cast<int>(eventTypes::BotEvent)].empty()) return returnNull();
+    if (eventTypes(type) != eventTypes::Command && Event::processor.noRegistered(type)) return returnNull();
     try {
-        switch (type) {
-            case 1: {
+        switch (eventTypes(type)) {
+            case eventTypes::GroupMessageEvent: {
                 //GroupMessage
                 Event::processor.broadcast<GroupMessageEvent>(
                         GroupMessageEvent(j["group"]["botid"],
@@ -1406,7 +1411,7 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                                                   .plus(MessageSource::deserializeFromString(j["source"].get<std::string>()))));
                 break;
             }
-            case 2: {
+            case eventTypes::PrivateMessageEvent: {
                 //私聊消息
                 Event::processor.broadcast<PrivateMessageEvent>(
                         PrivateMessageEvent(j["friend"]["botid"],
@@ -1415,7 +1420,7 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                                                     .plus(MessageSource::deserializeFromString(j["source"].get<std::string>()))));
                 break;
             }
-            case 3:
+            case eventTypes::GroupInviteEvent:
                 //群聊邀请
                 Event::processor.broadcast<GroupInviteEvent>(
                         GroupInviteEvent(
@@ -1426,7 +1431,7 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                                 j["source"]["groupname"],
                                 j["source"]["groupid"]));
                 break;
-            case 4:
+            case eventTypes::NewFriendRequestEvent:
                 //好友
                 Event::processor.broadcast<NewFriendRequestEvent>(
                         NewFriendRequestEvent(
@@ -1437,7 +1442,7 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                                 j["source"]["fromnick"],
                                 j["source"]["message"]));
                 break;
-            case 5:
+            case eventTypes::MemberJoinEvent:
                 //新成员加入
                 Event::processor.broadcast<MemberJoinEvent>(
                         MemberJoinEvent(
@@ -1447,7 +1452,7 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                                 Group(Group::deserialize(j["group"])),
                                 j["inviterid"]));
                 break;
-            case 6:
+            case eventTypes::MemberLeaveEvent:
                 //群成员退出
                 Event::processor.broadcast<MemberLeaveEvent>(MemberLeaveEvent(
                         j["group"]["botid"],
@@ -1456,7 +1461,7 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                         Group(Group::deserialize(j["group"])),
                         j["operatorid"]));
                 break;
-            case 7:
+            case eventTypes::RecallEvent:
                 Event::processor.broadcast<RecallEvent>(RecallEvent(
                         j["botid"],
                         j["etype"],
@@ -1467,14 +1472,14 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                         j["internalids"],
                         j["groupid"]));
                 break;
-            case 9:
+            case eventTypes::BotJoinGroupEvent:
                 Event::processor.broadcast<BotJoinGroupEvent>(BotJoinGroupEvent(
                         j["group"]["botid"],
                         j["etype"],
                         Group(Group::deserialize(j["group"])),
                         j["inviterid"]));
                 break;
-            case 10:
+            case eventTypes::GroupTempMessageEvent:
                 Event::processor.broadcast<GroupTempMessageEvent>(GroupTempMessageEvent(
                         j["group"]["botid"],
                         Group(Group::deserialize(j["group"])),
@@ -1482,21 +1487,21 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                         MessageChain::deserializationFromMessageSourceJson(json::parse(j["message"].get<std::string>()))
                                 .plus(MessageSource::deserializeFromString(j["source"]))));
                 break;
-            case 11:
-                Event::processor.broadcast<BotOnlineEvent>(BotOnlineEvent(j["botid"]));
+            case eventTypes::TimeOutEvent:
+                Event::processor.broadcast(TimeOutEvent(j["msg"]));
                 break;
-            case 12:
-                Event::processor.broadcast<TimeOutEvent>(TimeOutEvent(j["msg"]));
+            case eventTypes::BotOnlineEvent:
+                Event::processor.broadcast(BotOnlineEvent(j["botid"]));
                 break;
-            case 13:
-                Event::processor.broadcast<NudgeEvent>(NudgeEvent(Contact::deserialize(j["from"]),
-                                                                  Contact::deserialize(j["target"]),
-                                                                  j["botid"]));
+            case eventTypes::NudgeEvent:
+                Event::processor.broadcast(NudgeEvent(Contact::deserialize(j["from"]),
+                                                      Contact::deserialize(j["target"]),
+                                                      j["botid"]));
                 break;
-            case 14:
+            case eventTypes::BotLeaveEvent:
                 Event::processor.broadcast(BotLeaveEvent(j["groupid"], j["botid"]));
                 break;
-            case 15: {
+            case eventTypes::MemberJoinRequestEvent: {
                 std::optional<Group> a;
                 std::optional<Member> b;
                 Contact temp = Contact::deserialize(j["group"]);
@@ -1512,11 +1517,11 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
                 Event::processor.broadcast(MemberJoinRequestEvent(a, b, temp.botid(), j["requestData"]));
                 break;
             }
-            case 16: {
+            case eventTypes::MessagePreSendEvent: {
                 Event::processor.broadcast(MessagePreSendEvent(Contact::deserialize(j["target"]), MessageChain::deserializationFromMessageSourceJson(j["message"].get<std::string>(), false), j["botid"]));
                 break;
             }
-            case 17: {
+            case eventTypes::Command: {
                 // command
                 std::optional<Contact> c = std::nullopt;
                 if (j.contains("contact")) c = Contact::deserialize(j["contact"]);
@@ -1528,7 +1533,8 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
         }
     } catch (json::type_error &e) {
         Logger::logger.error("json格式化异常,位置C-Handle");
-        Logger::logger.error(e.what(), false);
+        Logger::logger.error(e.what());
+        Logger::logger.error("info:", tmp);
         return Tools::str2jstring("ERROR");
     } catch (const MiraiCPException &e) {
         e.raise();
@@ -1536,6 +1542,7 @@ JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
     } catch (const std::exception &e) {
         // 这里如果不catch全部exception就会带崩jvm
         Logger::logger.error(e.what());
+        Logger::logger.error("info:", tmp);
         return Tools::str2jstring("ERROR");
     }
     return returnNull();
