@@ -17,9 +17,9 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef MIRAICP_PRO_BOT_H
 #define MIRAICP_PRO_BOT_H
-#include <vector>
-#include <string>
 #include <jni.h>
+#include <string>
+#include <vector>
 namespace MiraiCP {
     class Friend;  // forward declaration
     class Group;   // forward declaration
@@ -31,6 +31,10 @@ namespace MiraiCP {
         bool inited = false;
         std::string _nick;
         std::string _avatarUrl;
+    public:
+        /// 该botid
+        QQID id;
+    private:
         void check() {
             if (!this->inited) {
                 refreshInfo();
@@ -38,8 +42,6 @@ namespace MiraiCP {
             }
         }
     public:
-        /// 该botid
-        QQID id;
         /*!
          * @brief 刷新bot信息
          * @param env
@@ -62,13 +64,13 @@ namespace MiraiCP {
             return this->_avatarUrl;
         }
         /// 取好友列表
-        std::vector<unsigned long long> getFriendList(JNIEnv *env = nullptr);
+        std::vector<QQID> getFriendList(JNIEnv *env = nullptr) const;
         /// 好友列表string形式返回，利于保存
         std::string FriendListToString();
         /// 取群列表
-        std::vector<unsigned long long> getGroupList(JNIEnv *env = nullptr);
+        std::vector<QQID> getGroupList(JNIEnv *env = nullptr) const;
         /// 群列表string形式返回，利于保存
-        std::string GroupListToString();
+        std::string GroupListToString() const;
         bool operator==(const Contact &c) const;
         bool operator==(const Bot &b) const {
             return this->id == b.id;
@@ -414,7 +416,9 @@ namespace MiraiCP {
             /// 图片是否已经上传
             ImageUploaded,
             /// 注册指令
-            CommandReg
+            CommandReg,
+            /// 改名称
+            ChangeNameCard,
         };
         /**
          * @brief 调用mirai操作
@@ -432,261 +436,266 @@ namespace MiraiCP {
 // #include "Exception.h"
 #ifndef MIRAICP_PRO_EXCEPTION_H
 #define MIRAICP_PRO_EXCEPTION_H
-#define MiraiCPThrow(x) throw((x).append(__FILE__, __LINE__))
+// #define MiraiCPThrow(x) throw x.append(__FILE__, __LINE__)
 #define ErrorHandle(x, y) ErrorHandle0(__FILE__, __LINE__, (x), (y))
+#define MIRAICP_EXCEPTION_WHERE __FILE__, __LINE__
+#if defined(_MSC_VER)
+#define ShouldNotUse(msg) _Pragma("warning(error:4996)") [[deprecated(msg)]] _Pragma("warning(warning:4996)")
+#else
+#if defined(__GNUC__)
+#define ShouldNotUse(msg) [[deprecated(msg)]] __attribute__((error(msg)))
+#else
+#define ShouldNotUse(msg)
+#endif
+#endif
 #include <exception>
 #include <string>
 namespace MiraiCP {
-    /// @brief 总异常抽象类
-    /// @interface MiraiCPException
-    class MiraiCPException : public std::exception {
+    /// @brief 总异常抽象类，用于一般捕获，不要直接抛出该类，不知道抛出什么的时候请抛出 MiraiCPException
+    /// @interface MiraiCPExceptionBase
+    class MiraiCPExceptionBase : public ::std::exception {
+    protected:
         using string = std::string;
     protected:
+        /// @brief 异常内容
         string re;
     public:
-        /// 异常的类型
-        virtual string exceptionType() const { return "MiraiCPException"; }
-    public:
+        /// @brief 发生异常的行号
         int lineNum = 0;
+        /// @brief 发生异常的文件名
         string filename;
-        //构造时传入类型字符串
-        explicit MiraiCPException(std::string description = "") {
-            if (description.empty())
-                this->re = MiraiCPException::exceptionType() + ":MiraiCP异常";
-            else
-                this->re = MiraiCPException::exceptionType() + ":" + std::move(description);
-        }
+    protected:
+        /// 受保护构造函数，供子类调用
+        MiraiCPExceptionBase(string _filename, int _lineNum) : filename(std::move(_filename)), lineNum(_lineNum) {}
+    public:
+        ~MiraiCPExceptionBase() override = default;
+    protected:
         /// @brief 异常事件广播
-        class ExceptionBroadcasting {
-        public:
-            MiraiCPException *e;
-            explicit ExceptionBroadcasting(MiraiCPException *ex) : e(ex) {}
-            ~ExceptionBroadcasting();
-        };
-        /// 报错位置信息, 由MiraiThrow宏传递
-        MiraiCPException append(string name, int line) {
-            lineNum = line;
-            filename = std::move(name);
-            // destroy this object immediately, to call the destructor of `ExceptionBroadcasting`
-            ExceptionBroadcasting(this);
-            return *this;
-        }
+        void exception_broadcast();
+    public:
         /// 异常信息
         const char *what() const noexcept override { return re.c_str(); }
-        /// basicRaise 基本抛出方法，子类重写该方法
-        virtual void basicRaise() const;
         /// 实际抛出方法
         void raise() const;
+    public: // 暴露的接口
+        /// basicRaise 基本抛出方法，子类重写该方法
+        virtual void basicRaise() const;
+        // CRTP实现一次，调用静态的exceptionType
+        /// 获取异常类型，通用接口
+        virtual string getExceptionType() = 0;
+        // 每个子类需要单独实现该静态方法
+        /// 返回异常的类型，该静态方法无法正确实现多态，请使用 getExceptionType
+        /// @see getExceptionType
+        static string exceptionType() { return "MiraiCPException"; }
     };
-    /// 文件读取异常.
-    /// @see MiraiCPException
-    class UploadException : public MiraiCPException {
-    private:
-        std::string description;
-    public:
-        explicit UploadException(const std::string &text) {
-            this->description = "上传(图片/文件)异常" + text;
-            this->re = this->exceptionType() + this->description;
+    /// @brief 总异常CRTP抽象类，不要直接抛出该类，不知道抛出什么的时候请抛出 MiraiCPException
+    /// @interface MiraiCPExceptionCRTP
+    /// @note 请勿给该类增加新的属性。如果要增加属性应在 MiraiCPExceptionBase 中增加
+    template<class T>
+    class MiraiCPExceptionCRTP : public MiraiCPExceptionBase {
+    protected:
+        /// 委托构造函数
+        MiraiCPExceptionCRTP(string _filename, int _lineNum) : MiraiCPExceptionBase(std::move(_filename), _lineNum) {
+            exception_broadcast();
         }
-        std::string exceptionType() const override { return "UploadException"; }
+    public:
+        // 构造时传入类型字符串
+        // 最好不要调用该构造函数
+        explicit MiraiCPExceptionCRTP(const string &description, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            if (description.empty())
+                this->re = T::exceptionType() + ":MiraiCP异常";
+            else
+                this->re = T::exceptionType() + ":" + description;
+        }
+    public:
+        // CRTP类型获取实现
+        string getExceptionType() override { return T::exceptionType(); }
+    };
+    /// @brief 通用MiraiCP异常
+    /// @param const string &description, string _filename, int _lineNum
+    /// @see MiraiCPExceptionBase
+    typedef MiraiCPExceptionCRTP<MiraiCPExceptionBase> MiraiCPException;
+    /// 文件读取异常.
+    /// @see MiraiCPExceptionBase
+    class UploadException : public MiraiCPExceptionCRTP<UploadException> {
+    public:
+        explicit UploadException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "上传(图片/文件)异常" + text;
+        }
+        static std::string exceptionType() { return "UploadException"; }
     };
     /// 通常为Mirai返回
-    /// @see MiraiCPException
-    class IllegalStateException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class IllegalStateException : public MiraiCPExceptionCRTP<IllegalStateException> {
     public:
-        explicit IllegalStateException(const std::string &text) : MiraiCPException("IllegalStateException") {
-            this->description = "状态异常:" + text;
-            this->re = IllegalStateException::exceptionType() + this->description;
+        explicit IllegalStateException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "状态异常:" + text;
         }
-        std::string exceptionType() const override { return "IllegalStateException"; }
+        static std::string exceptionType() { return "IllegalStateException"; }
     };
     /// 内部异常, 通常为json读写问题
-    /// @see MiraiCPException
-    class APIException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class APIException : public MiraiCPExceptionCRTP<APIException> {
     public:
-        explicit APIException(const std::string &text) {
-            this->description = "MiraiCP内部无法预料的错误:" + text;
-            this->re = APIException::exceptionType() + this->description;
+        explicit APIException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "MiraiCP内部无法预料的错误:" + text;
         }
-        std::string exceptionType() const override { return "APIException"; }
+        static string exceptionType() { return "APIException"; }
     };
     /// 机器人操作异常
-    /// @see MiraiCPException
-    class BotException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class BotException : public MiraiCPExceptionCRTP<BotException> {
     public:
-        explicit BotException(std::string d = "没有权限执行该操作") {
-            this->description = std::move(d);
-            // BotIsBeingMutedException doesn't have a constructor, use `this`
-            this->re = this->exceptionType() + this->description;
+        explicit BotException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            re = "没有权限执行该操作";
         }
-        std::string exceptionType() const override { return "BotException"; }
+        explicit BotException(string d, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            re = std::move(d);
+        }
+        static string exceptionType() { return "BotException"; }
     };
     /// 被禁言异常, 通常发生于发送信息
-    class BotIsBeingMutedException : public BotException {
+    class BotIsBeingMutedException : public MiraiCPExceptionCRTP<BotIsBeingMutedException> {
     public:
         /// 剩余禁言时间, 单位秒
         int timeRemain;
     public:
-        explicit BotIsBeingMutedException(int t) : BotException("发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t)) {
+        explicit BotIsBeingMutedException(int t, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t);
             timeRemain = t;
         }
-        std::string exceptionType() const override { return "BotIsBeingMutedException"; }
+        static string exceptionType() { return "BotIsBeingMutedException"; }
     };
     /// 禁言异常
-    /// @see MiraiCPException
-    class MuteException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class MuteException : public MiraiCPExceptionCRTP<MuteException> {
     public:
         /*
         *	 禁言时间超出0s~30d
         */
-        MuteException() {
-            this->description = "禁言时长不在0s~30d中间";
-            this->re = MuteException::exceptionType() + this->description;
+        MuteException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "禁言时长不在0s~30d中间";
         }
-        std::string exceptionType() const override { return "MuteException"; }
+        static string exceptionType() { return "MuteException"; }
     };
     /// 获取群成员错误
-    /// @see MiraiCPException
-    class MemberException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class MemberException : public MiraiCPExceptionCRTP<MemberException> {
     public:
-        int type = 0;
+        enum MemberExceptionType : int {
+            OtherType,
+            NoSuchGroup,
+            NoSuchMember
+        };
+        MemberExceptionType type = OtherType;
         /*
         *   "1" - 找不到群
         *	"2" - 找不到群成员
         */
-        explicit MemberException(int type) {
-            this->type = type;
+        explicit MemberException(int _type, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            type = MemberExceptionType(_type);
             switch (type) {
-                case 1:
-                    this->description = "找不到群";
+                case NoSuchGroup:
+                    this->re = "找不到群";
                     break;
-                case 2:
-                    this->description = "找不到群成员";
+                case NoSuchMember:
+                    this->re = "找不到群成员";
                     break;
                 default:
                     break;
             }
-            this->re = MemberException::exceptionType() + this->description;
+            this->re = "";
         }
-        std::string exceptionType() const override { return "MemberException"; }
+        static string exceptionType() { return "MemberException"; }
     };
     /// 获取群成员错误
-    /// @see MiraiCPException
-    class FriendException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class FriendException : public MiraiCPExceptionCRTP<FriendException> {
     public:
         /*
         *   找不到好友
         */
-        FriendException() : MiraiCPException("FriendException") {
-            this->description = "找不到好友";
-            this->re = FriendException::exceptionType() + this->description;
+        FriendException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "找不到好友";
         }
-        std::string exceptionType() const override { return "FriendException"; }
+        static string exceptionType() { return "FriendException"; }
     };
     /// 获取群错误
-    /// @see MiraiCPException
-    class GroupException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class GroupException : public MiraiCPExceptionCRTP<GroupException> {
     public:
-        GroupException() {
-            this->description = "C++:找不到群";
-            this->re = GroupException::exceptionType() + this->description;
+        GroupException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "C++:找不到群";
         }
-        std::string exceptionType() const override { return "GroupException"; }
+        static string exceptionType() { return "GroupException"; }
     };
     /// 撤回异常
-    /// @see MiraiCPException
-    class RecallException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class RecallException : public MiraiCPExceptionCRTP<RecallException> {
     public:
-        RecallException() {
-            this->description = "该消息已经被撤回";
-            this->re = RecallException::exceptionType() + this->description;
+        RecallException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "该消息已经被撤回";
         }
-        std::string exceptionType() const override { return "RecallException"; }
+        static string exceptionType() { return "RecallException"; }
     };
     /// 远程资源出现问题
-    /// @see MiraiCPException
-    class RemoteAssetException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class RemoteAssetException : public MiraiCPExceptionCRTP<RemoteAssetException> {
     public:
-        explicit RemoteAssetException(std::string e) {
-            this->description = std::move(e);
-            this->re = RemoteAssetException::exceptionType() + this->description;
+        explicit RemoteAssetException(string e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = std::move(e);
         }
-        std::string exceptionType() const override { return "RemoteAssetException"; }
+        static string exceptionType() { return "RemoteAssetException"; }
     };
     /// 参数错误
-    /// @see MiraiCPException
-    class IllegalArgumentException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class IllegalArgumentException : public MiraiCPExceptionCRTP<IllegalArgumentException> {
     public:
-        explicit IllegalArgumentException(std::string e) {
-            this->description = std::move(e);
-            this->re = IllegalArgumentException::exceptionType() + this->description;
+        explicit IllegalArgumentException(string e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = std::move(e);
         }
-        std::string exceptionType() const override { return "IllegalArgumentException"; }
+        static string exceptionType() { return "IllegalArgumentException"; }
     };
     /// 超时
-    /// @see MiraiCPException
-    class TimeOutException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class TimeOutException : public MiraiCPExceptionCRTP<TimeOutException> {
     public:
-        explicit TimeOutException(std::string e) {
-            this->description = std::move(e);
-            this->re = TimeOutException::exceptionType() + this->description;
+        explicit TimeOutException(std::string e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = std::move(e);
         }
-        std::string exceptionType() const override { return "TimeOutException"; }
+        static string exceptionType() { return "TimeOutException"; }
     };
     /// 事件被取消, 一般出现在发送消息时在preSendMessageEvent取消的时候抛出
-    /// @see MiraiCPException
-    class EventCancelledException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class EventCancelledException : public MiraiCPExceptionCRTP<EventCancelledException> {
     public:
-        explicit EventCancelledException(const std::string &msg) {
-            description = msg;
-            re = EventCancelledException::exceptionType() + msg;
+        explicit EventCancelledException(const string &msg, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            re = msg;
         }
-        std::string exceptionType() const override { return "EventCancelledException"; }
+        static string exceptionType() { return "EventCancelledException"; }
     };
     inline void ErrorHandle0(const std::string &name, int line, const std::string &re, const std::string &ErrorMsg = "") {
         if (re == "EF")
-            throw FriendException().append(name, line);
+            throw FriendException(name, line);
         if (re == "EG")
-            throw GroupException().append(name, line);
+            throw GroupException(name, line);
         if (re == "EM")
-            throw MemberException(1).append(name, line);
+            throw MemberException(1, name, line);
         if (re == "EMM")
-            throw MemberException(2).append(name, line);
+            throw MemberException(2, name, line);
         if (re == "EB")
-            throw BotException("找不到bot:" + re).append(name, line);
+            throw BotException("找不到bot:" + re, name, line);
         if (re == "EA")
-            throw APIException(ErrorMsg).append(name, line);
+            throw APIException(ErrorMsg, name, line);
         if (re == "EC")
-            throw EventCancelledException("发送信息被取消").append(name, line);
+            throw EventCancelledException("发送信息被取消", name, line);
         if (re == "ET")
-            throw TimeOutException("发送信息超时").append(name, line);
+            throw TimeOutException("发送信息超时", name, line);
+        if (re == "EP")
+            throw BotException(name, line);
         // equal to Tools::start_with
         if (re.rfind("EBM", 0) == 0)
-            throw BotIsBeingMutedException(std::stoi(re.substr(3))).append(name, line);
+            throw BotIsBeingMutedException(std::stoi(re.substr(3)), name, line);
     }
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_EXCEPTION_H
@@ -718,33 +727,46 @@ namespace MiraiCP {
      * @attention loader端的命令只支持从console传入, plugin端是对接mirai的RawCommand
      */
     class IRawCommand {
+        using string = std::string;
     public:
         struct Config {
         public:
             /// 指令名不能为空
-            std::string primaryName;
+            string primaryName;
             /// 可以为空
-            std::vector<std::string> secondNames;
+            std::vector<string> secondNames;
             /// 用法
-            std::string usage;
+            string usage;
             /// 描述
-            std::string description;
+            string description;
             /// 覆盖已有命令
             bool override;
             /// 前缀`/`可省略
             bool preFixOption;
-            explicit Config(std::string primaryName, std::vector<std::string> secondNames = std::vector<std::string>(), std::string usage = "null", std::string description = "null", bool override = false, bool preFixOption = false) : primaryName(std::move(primaryName)), secondNames(std::move(secondNames)), usage(std::move(usage)), description(std::move(description)), override(override), preFixOption(preFixOption) {}
+            explicit Config(string primaryName,
+                            std::vector<string> secondNames = std::vector<std::string>(),
+                            string usage = "null",
+                            string description = "null",
+                            bool override = false,
+                            bool preFixOption = false)
+                : primaryName(std::move(primaryName)),
+                  secondNames(std::move(secondNames)),
+                  usage(std::move(usage)),
+                  description(std::move(description)),
+                  override(override),
+                  preFixOption(preFixOption) {}
         };
         virtual IRawCommand::Config config() = 0;
         virtual void onCommand(std::optional<Contact>, const Bot &, const MessageChain &) = 0;
         IRawCommand() = default;
+        virtual ~IRawCommand() = default;
     };
     class CommandManager {
     private:
         CommandManager() = default;
         std::vector<std::shared_ptr<IRawCommand>> commandList;
     public:
-        std::shared_ptr<IRawCommand> operator[](int index) { return commandList[index]; }
+        std::shared_ptr<IRawCommand> operator[](const int &index) { return commandList[index]; }
         /*!
          * @brief 注册一条指令
          * @param command 指令
@@ -773,7 +795,7 @@ namespace MiraiCP {
                 if (i != commandList.end())
                     j["bindId"] = i - commandList.begin();
                 else
-                    MiraiCPThrow(IllegalArgumentException("找不到合适的bindId"));
+                    throw IllegalArgumentException("找不到合适的bindId", MIRAICP_EXCEPTION_WHERE);
             }
             nlohmann::json rej;
             rej["command"] = j.dump();
@@ -856,7 +878,9 @@ namespace MiraiCP {
             /// 图片是否已经上传
             ImageUploaded,
             /// 注册指令
-            CommandReg
+            CommandReg,
+            /// 改名称
+            ChangeNameCard,
         };
         /**
          * @brief 调用mirai操作
@@ -887,9 +911,10 @@ namespace MiraiCP {
 // #include "MessageSource.h"
 #ifndef MIRAICP_PRO_MESSAGESOURCE_H
 #define MIRAICP_PRO_MESSAGESOURCE_H
-// #include "MiraiCode.h"
+#include <string>
 #include <jni.h>
 namespace MiraiCP {
+    class MiraiCodeable; // forward declaration
     using QQID = unsigned long long;
     /*! 消息源声明
      * @example 撤回信息(check in version 2.9.0)
@@ -945,6 +970,7 @@ namespace MiraiCP {
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_MESSAGESOURCE_H
+// #include "MiraiCode.h"
 namespace MiraiCP {
     /// 用serviceMessage的分享信息
     struct URLSharer {
@@ -963,7 +989,7 @@ namespace MiraiCP {
     class SingleMessage : public MiraiCodeable {
     public:
         virtual ~SingleMessage() = default;
-        static std::map<int, std::string> messageType;
+        static std::unordered_map<int, std::string> messageType;
         virtual nlohmann::json toJson() const {
             nlohmann::json re;
             re["key"] = "miraicode";
@@ -1230,8 +1256,8 @@ namespace MiraiCP {
     class QuoteReply : public SingleMessage {
     public:
         static int type() { return -2; }
-        /// 不可直接发送, 发送引用信息用MessageChain.quoteAndSendMessage
-        [[deprecated("cannot use, use MessageChain.quote")]] std::string toMiraiCode() const override {
+        // 不可直接发送, 发送引用信息用MessageChain.quoteAndSendMessage
+        ShouldNotUse("don't have MiraiCode, use MessageChain.quote instead") std::string toMiraiCode() const override {
             return "";
         }
         /// 引用信息的MessageSource
@@ -1448,10 +1474,10 @@ namespace MiraiCP {
             T get() const {
                 static_assert(std::is_base_of_v<SingleMessage, T>, "只支持SingleMessage的派生类");
                 if (T::type() != this->type())
-                    MiraiCPThrow(IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()]));
+                    throw IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()], MIRAICP_EXCEPTION_WHERE);
                 T *re = static_cast<T *>(this->content.get());
                 if (re == nullptr)
-                    MiraiCPThrow(IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()]));
+                    throw IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()], MIRAICP_EXCEPTION_WHERE);
                 return *re;
             }
             bool operator==(const Message &m) const {
@@ -1690,41 +1716,7 @@ namespace MiraiCP {
      * @endcode
     */
     class Contact {
-    private:
-        /// 发送纯文本信息
-        /// @throw IllegalArgumentException, TimeOutException, BotIsBeingMutedException
-        MessageSource sendMsg0(const std::string &msg, int retryTime, bool miraicode = false,
-                               JNIEnv * = nullptr) const;
-        template<class T>
-        MessageSource send1(T msg, int retryTime, JNIEnv *env) {
-            static_assert(std::is_base_of_v<SingleMessage, T>, "只支持SingleMessage的派生类");
-            return sendMsg0(msg.toMiraiCode(), retryTime, true, env);
-        }
-        MessageSource send1(MessageChain msg, int retryTime, JNIEnv *env) {
-            return sendMsg0(msg.toMiraiCode(), retryTime, true, env);
-        }
-        MessageSource send1(MiraiCode msg, int retryTime, JNIEnv *env) {
-            return sendMsg0(msg.toMiraiCode(), retryTime, true, env);
-        }
-        MessageSource send1(std::string msg, int retryTime, JNIEnv *env) {
-            return sendMsg0(msg, retryTime, false, env);
-        }
-        MessageSource send1(const char *msg, int retryTime, JNIEnv *env) {
-            return sendMsg0(std::string(msg), retryTime, false, env);
-        }
-        MessageSource quoteAndSend0(const std::string &msg, MessageSource ms, JNIEnv *env = nullptr);
-        template<class T>
-        MessageSource quoteAndSend1(T s, MessageSource ms, JNIEnv *env = nullptr) {
-            static_assert(std::is_base_of_v<SingleMessage, T>, "只支持SingleMessage的派生类");
-            return this->quoteAndSend0(s.toMiraiCode(), ms, env);
-        }
-        MessageSource quoteAndSend1(std::string s, MessageSource ms, JNIEnv *env) {
-            return this->quoteAndSend0(s, ms, env);
-        }
-        MessageSource quoteAndSend1(MessageChain mc, MessageSource ms, JNIEnv *env) {
-            return this->quoteAndSend0(mc.toMiraiCode(), ms, env);
-        }
-    protected:
+    protected: // attrs
         int _type = 0;
         QQID _id;
         QQID _groupid;
@@ -1732,9 +1724,11 @@ namespace MiraiCP {
         std::string _avatarUrl;
         QQID _botid;
         bool _anonymous = false;
+    protected:
         /// 发送语音
         MessageSource sendVoice0(const std::string &path, JNIEnv * = nullptr);
     public:
+        // constructors
         /*!
          * @brief 无参初始化Contact类型
          * @internal 一般在MiraiCp内部构造
@@ -1745,9 +1739,6 @@ namespace MiraiCP {
             this->_groupid = 0;
             this->_nickOrNameCard = "";
             this->_botid = 0;
-        }
-        bool operator==(const Contact &c) const {
-            return this->id() == c.id();
         }
         /*!
          * @brief 构造contact类型
@@ -1769,6 +1760,13 @@ namespace MiraiCP {
             this->_botid = botid;
             this->_anonymous = anonymous;
         };
+        //        Contact(Contact &&c) : _type(c._type), _id(c._id), _groupid(c._groupid), _botid(c._botid), _anonymous(c._anonymous), _nickOrNameCard(std::move(c._nickOrNameCard)), _avatarUrl(std::move(c._avatarUrl)) {
+        //        }
+        // destructor
+        virtual ~Contact() = default;
+        bool operator==(const Contact &c) const {
+            return this->id() == c.id();
+        }
         /// @brief 当前对象类型
         ///     - 1 Friend 好友
         ///     - 2 Group 群聊
@@ -1791,6 +1789,7 @@ namespace MiraiCP {
         std::string avatarUrl() const { return this->_avatarUrl; };
         /// 所属bot
         QQID botid() const { return this->_botid; };
+    public: // serialization
         /// 序列化到json对象
         nlohmann::json toJson() const {
             nlohmann::json j;
@@ -1816,6 +1815,7 @@ namespace MiraiCP {
         /// @throw APIException
         static Contact deserialize(const std::string &source);
         static Contact deserialize(nlohmann::json source);
+    public:
         /// @deprecated since v2.8.1, use `Contact::deserialize(source)`
         [[deprecated("use deserialize")]] static Contact deserializationFromString(const std::string &source) = delete;
         /// @deprecated since v2.8.1, use `sendMessage(MiraiCode)` or `sendMsg0(msg.toMiraiCode(), retryTime, true, env)`
@@ -1883,7 +1883,7 @@ namespace MiraiCP {
         /// @deprecated since v2.8.1, use `sendMessage(Tools::VectorToString(std::move(msg)))` or `sendMsg0(Tools::VectorToString(std::move(msg)), retryTime, false, env);`
         [[deprecated("Use sendMessage")]] MessageSource sendMsg(std::vector<std::string> msg, int retryTime = 3, JNIEnv *env = nullptr) = delete;
         /*!
-        * @brief上传本地图片，务必要用绝对路径
+        * @brief 上传本地图片，务必要用绝对路径
         * 由于mirai要区分图片发送对象，所以使用本函数上传的图片只能发到群
         * @attention 最大支持图片大小为30MB
         * @throws
@@ -1892,8 +1892,55 @@ namespace MiraiCP {
         */
         Image uploadImg(const std::string &path, JNIEnv * = nullptr) const;
         FlashImage uploadFlashImg(const std::string &path, JNIEnv * = nullptr) const;
-        /// 刷新当前对象信息
-        virtual void refreshInfo(JNIEnv *){};
+        template<class T>
+        T to() {
+            static_assert(std::is_base_of_v<Contact, T>);
+            return T(*this);
+        }
+    private: // private methods
+        /// 发送纯文本信息
+        /// @throw IllegalArgumentException, TimeOutException, BotIsBeingMutedException
+        MessageSource sendMsg0(const std::string &msg, int retryTime, bool miraicode = false,
+                               JNIEnv * = nullptr) const;
+        template<class T>
+        MessageSource send1(T msg, int retryTime, JNIEnv *env) {
+            static_assert(std::is_base_of_v<SingleMessage, T>, "只支持SingleMessage的派生类");
+            return sendMsg0(msg.toMiraiCode(), retryTime, true, env);
+        }
+        MessageSource send1(MessageChain msg, int retryTime, JNIEnv *env) {
+            return sendMsg0(msg.toMiraiCode(), retryTime, true, env);
+        }
+        MessageSource send1(MiraiCode msg, int retryTime, JNIEnv *env) {
+            return sendMsg0(msg.toMiraiCode(), retryTime, true, env);
+        }
+        MessageSource send1(std::string msg, int retryTime, JNIEnv *env) {
+            return sendMsg0(msg, retryTime, false, env);
+        }
+        MessageSource send1(const char *msg, int retryTime, JNIEnv *env) {
+            return sendMsg0(std::string(msg), retryTime, false, env);
+        }
+        MessageSource quoteAndSend0(const std::string &msg, MessageSource ms, JNIEnv *env = nullptr);
+        template<class T>
+        MessageSource quoteAndSend1(T s, MessageSource ms, JNIEnv *env = nullptr) {
+            static_assert(std::is_base_of_v<SingleMessage, T>, "只支持SingleMessage的派生类");
+            return this->quoteAndSend0(s.toMiraiCode(), ms, env);
+        }
+        MessageSource quoteAndSend1(std::string s, MessageSource ms, JNIEnv *env) {
+            return this->quoteAndSend0(s, ms, env);
+        }
+        MessageSource quoteAndSend1(MessageChain mc, MessageSource ms, JNIEnv *env) {
+            return this->quoteAndSend0(mc.toMiraiCode(), ms, env);
+        }
+    };
+    class INudgeSupport{
+    public:
+        /*!
+         * @brief 发送戳一戳
+         * @warning 仅限Friend, Member类调用
+         * @see MiraiCP::Friend::sendNudge, MiraiCP::Member::sendNudge
+         * @throw MiraiCP::BotException, MiraiCP::IllegalStateException
+         */
+        virtual void sendNudge() = 0;
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_CONTACT_H
@@ -1906,24 +1953,28 @@ namespace MiraiCP {
 // #include "Contact.h"
 namespace MiraiCP {
     /// 好友类声明
-    class Friend : public Contact {
+    class Friend : public Contact, INudgeSupport {
     public:
         /// 删除好友(delete是C++关键字
         void deleteFriend(JNIEnv *env = nullptr);
-        void refreshInfo(JNIEnv *env = nullptr) override;
+        void refreshInfo(JNIEnv *env = nullptr);
         /*!
          * @brief 发送戳一戳
          * @warning 发送戳一戳的前提是登录该bot的协议是android_phone/ipad, 否则抛出IllegalStateException
          * @throw MiraiCP::BotException, MiraiCP::IllegalStateException
          */
-        void sendNudge();
+        void sendNudge() override;
         /*!
          * @brief 构建好友对象
          * @param friendid q号
          * @param botid 对应机器人id
          */
         explicit Friend(QQID friendid, QQID botid, JNIEnv * = nullptr);
-        explicit Friend(Contact c) : Contact(std::move(c)) { refreshInfo(); };
+        explicit Friend(const Contact &c) : Contact(c) {
+            if (c.type() != 1)
+                throw IllegalArgumentException("无法从 type==" + std::to_string(c.type()) + " 转为 type == 1(friend)", MIRAICP_EXCEPTION_WHERE);
+            refreshInfo();
+        };
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_FRIEND_H
@@ -1967,7 +2018,7 @@ namespace MiraiCP {
      *   @endcode
      */
     class Group : public Contact {
-    public:
+    public: // member classes and structs
         /// 群公告参数
         class AnnouncementParams {
         public:
@@ -2016,7 +2067,7 @@ namespace MiraiCP {
             /// @throw BotException
             void deleteThis();
             /// 反序列化
-            static OnlineAnnouncement deserializeFromJson(nlohmann::json);
+            static OnlineAnnouncement deserializeFromJson(const nlohmann::json &);
             OnlineAnnouncement(const std::string &content, AnnouncementParams &params,
                                QQID groupid, QQID senderid, QQID botid,
                                long long int publicationTime, const std::string &fid, int confirmNum,
@@ -2053,8 +2104,27 @@ namespace MiraiCP {
             /// 允许匿名聊天
             bool isAnonymousChatEnabled{};
         };
+        /// 群文件的简短描述
+        struct file_short_info {
+            // 路径带文件名
+            std::string path;
+            // 唯一id
+            std::string id;
+        };
+    public: // attrs
         /// 群设置
         GroupSetting setting;
+    public: // constructors
+        ///  @brief 构建以群号构建群对象
+        /// @param groupid 群号
+        /// @param botid 机器人id
+        Group(QQID groupid, QQID botid, JNIEnv * = nullptr);
+        explicit Group(const Contact &c) : Contact(c) {
+            if (c.type() != 2)
+                throw IllegalArgumentException("无法从 type==" + std::to_string(c.type()) + " 转为 type == 2(group)", MIRAICP_EXCEPTION_WHERE);
+            refreshInfo();
+        }
+    public: // methods
         /**
          * @brief 更新群设置, 即覆盖服务器上的群设置
          * @details 从服务器拉去群设置用refreshInfo
@@ -2072,17 +2142,13 @@ namespace MiraiCP {
         std::string MemberListToString();
         /// 取群主
         Member getOwner(JNIEnv * = nullptr);
-        ///  @brief 构建以群号构建群对象
-        /// @param groupid 群号
-        /// @param botid 机器人id
-        Group(QQID groupid, QQID botid, JNIEnv * = nullptr);
-        explicit Group(Contact c) : Contact(std::move(c)) { refreshInfo(); };
         /// 取群成员
         Member getMember(QQID memberid, JNIEnv *env = nullptr);
+        Member operator[](QQID id);
         /// 取群公告列表
         std::vector<OnlineAnnouncement> getAnnouncementsList(JNIEnv *env);
         /// 刷新群聊信息
-        void refreshInfo(JNIEnv *env = nullptr) override;
+        void refreshInfo(JNIEnv *env = nullptr);
         void quit(JNIEnv *env = nullptr);
         /*!
         @brief 上传并发送远程(群)文件
@@ -2115,13 +2181,6 @@ namespace MiraiCP {
         RemoteFile getFileByFile(const RemoteFile &file, JNIEnv *env = nullptr) {
             return getFileById(file.id, env);
         }
-        /// 群文件的简短描述
-        struct file_short_info {
-            // 路径带文件名
-            std::string path;
-            // 唯一id
-            std::string id;
-        };
         /*!
          * 获取path路径下全部文件信息
          * @param path - 远程路径
@@ -2169,7 +2228,7 @@ namespace MiraiCP {
         });
      * @endcode
      */
-    class Member : public Contact {
+    class Member : public Contact, INudgeSupport {
     public:
         /// @brief 权限等级
         ///     - OWNER群主 为 2
@@ -2187,14 +2246,16 @@ namespace MiraiCP {
         /// @param botid 机器人id
         explicit Member(QQID qqid, QQID groupid, QQID botid,
                         JNIEnv * = nullptr);
-        explicit Member(Contact c) : Contact(std::move(c)) {
+        explicit Member(const Contact &c) : Contact(c) {
+            if (c.type() != 3)
+                throw IllegalArgumentException("无法从 type==" + std::to_string(c.type()) + " 转为 type == 3(member)", MIRAICP_EXCEPTION_WHERE);
             this->isAnonymous = this->_anonymous;
             refreshInfo();
         };
         /// 是否是匿名群成员, 如果是匿名群成员一些功能会受限
         bool isAnonymous = false;
         /// 重新获取(刷新)群成员信息
-        void refreshInfo(JNIEnv *env = nullptr) override;
+        void refreshInfo(JNIEnv *env = nullptr);
         /// 发送语音
         MessageSource sendVoice(const std::string &path, JNIEnv *env = nullptr) {
             return Contact::sendVoice0(path, env);
@@ -2221,58 +2282,57 @@ namespace MiraiCP {
             /*返回at这个人的miraicode*/
             return At(this->id());
         }
+        /// 更改群名片
+        /// @throw MiraiCP::BotException 如果没权限时
+        void changeNameCard(std::string_view newName, JNIEnv* = nullptr);
         /*!
          * @brief 发送戳一戳
          * @warning 发送戳一戳的前提是登录该bot的协议是android_phone/ipad, 否则抛出IllegalStateException
          * @throw MiraiCP::BotException, MiraiCP::IllegalStateException
          */
-        void sendNudge();
+        void sendNudge() override;
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_MEMBER_H
-#define EVENT_TYPE_FUNC_GEN \
-    eventTypes getEventType() const override { return this->get_event_type(); }
 namespace MiraiCP {
     /// Event 工厂
     enum struct eventTypes {
-        BotEvent,               // 0
-        GroupMessageEvent,      // 1
-        PrivateMessageEvent,    // 2
-        GroupInviteEvent,       // 3
-        NewFriendRequestEvent,  // 4
-        MemberJoinEvent,        // 5
-        MemberLeaveEvent,       // 6
-        RecallEvent,            // 7
-        BotJoinGroupEvent,      // 8
-        GroupTempMessageEvent,  // 9
-        TimeOutEvent,           // 10
-        BotOnlineEvent,         // 11
-        NudgeEvent,             // 12
-        BotLeaveEvent,          // 13
-        MemberJoinRequestEvent, // 14
-        MessagePreSendEvent,    // 15
-        MiraiCPExceptionEvent,  // 16
-        Command,                // 17
-        count,                  // 事件在此位置前定义，此时count为事件种类数
-        error                   // 出现问题时使用此enum
+        BaseEvent [[maybe_unused]], // 0
+        GroupMessageEvent,          // 1
+        PrivateMessageEvent,        // 2
+        GroupInviteEvent,           // 3
+        NewFriendRequestEvent,      // 4
+        MemberJoinEvent,            // 5
+        MemberLeaveEvent,           // 6
+        RecallEvent,                // 7
+        BotJoinGroupEvent,          // 8
+        GroupTempMessageEvent,      // 9
+        TimeOutEvent,               // 10
+        BotOnlineEvent,             // 11
+        NudgeEvent,                 // 12
+        BotLeaveEvent,              // 13
+        MemberJoinRequestEvent,     // 14
+        MessagePreSendEvent,        // 15
+        MiraiCPExceptionEvent,      // 16
+        Command,                    // 17
+        count,                      // 事件在此位置前定义，此时count为事件种类数
+        error                       // 出现问题时使用此enum
     };
-    /// Event 接口
+    /// Event抽象父类
     class MiraiCPEvent {
-    public:
-        static eventTypes get_event_type() { return eventTypes::error; }
     public:
         MiraiCPEvent() = default;
         virtual ~MiraiCPEvent() = default;
-        virtual eventTypes getEventType() const { return this->get_event_type(); }
+    public:
+        static eventTypes get_event_type() { return eventTypes::error; }
+        virtual eventTypes getEventType() const = 0;
     };
-    /// 所以事件处理timeoutevent都是机器人事件，指都有机器人实例
+    /// 所有事件处理timeoutevent都是机器人事件，指都有机器人实例
+    template<class T>
     class BotEvent : public MiraiCPEvent {
     public:
-        EVENT_TYPE_FUNC_GEN
-        static eventTypes get_event_type() {
-            return eventTypes::BotEvent;
-        }
-    public:
+        eventTypes getEventType() const override { return T::get_event_type(); }
+        // TODO: 考虑设置一个Bot全局变量，此处存储一个Bot指针，减少无用构造.
         /// 该事件接受的机器人
         Bot bot;
         /// 以该机器人的名义发送日志
@@ -2288,9 +2348,8 @@ namespace MiraiCP {
      * e.group.sendMessage(tmp);
      * @endcode
      */
-    class GroupMessageEvent : public BotEvent {
+    class GroupMessageEvent : public BotEvent<GroupMessageEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::GroupMessageEvent;
         }
@@ -2306,18 +2365,18 @@ namespace MiraiCP {
                                              sender(sender), message(std::move(mc)){};
         /*!
          * @brief 取群聊下一个消息(群聊与本事件一样)
-         * @param time 超时时间限制
+         * @param time 超时时间限制, 单位为ms, 超时后抛出TimeOutException
          * @param halt 是否拦截该事件(不让这个消息被注册的其他监听器收到处理)
          * @return 消息链
          */
-        MessageChain nextMessage(long time = -1, bool halt = true, JNIEnv *env = nullptr);
+        MessageChain nextMessage(long time = -1, bool halt = true, JNIEnv *env = nullptr) const;
         /*!
          * @brief 取群聊中同群成员的下一个消息(发送人和群与本事件一样)
-         * @param time 超时时间限制
+         * @param time 超时时间限制, 单位为ms, 超时后抛出TimeOutException
          * @param halt 是否拦截该事件(不让消息被注册的其他监听器收到处理)
          * @return 消息链
          */
-        MessageChain senderNextMessage(long time = -1, bool halt = true, JNIEnv *env = nullptr);
+        MessageChain senderNextMessage(long time = -1, bool halt = true, JNIEnv *env = nullptr) const;
     };
     /*!
      * @detail 私聊消息事件类声明
@@ -2327,9 +2386,8 @@ namespace MiraiCP {
      * e.sender.sendMessage(tmp);
      * @endcode
      */
-    class PrivateMessageEvent : public BotEvent {
+    class PrivateMessageEvent : public BotEvent<PrivateMessageEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::PrivateMessageEvent;
         }
@@ -2350,16 +2408,15 @@ namespace MiraiCP {
         /*!
          * @brief 取下一个消息(发送人和接收人和本事件一样)
          * @warning 如果两次发送信息间隔过短可能会漏过信息
-         * @param time 超时时间限制
+         * @param time 超时时间限制, 单位为ms, 超时后抛出TimeOutException
          * @param halt 是否拦截该事件(不被注册的监听器收到处理)
          * @return 消息链
          */
-        MessageChain nextMessage(long time = -1, bool halt = true, JNIEnv *env = nullptr);
+        MessageChain nextMessage(long time = -1, bool halt = true, JNIEnv *env = nullptr) const;
     };
     /// 群聊邀请事件类声明
-    class GroupInviteEvent : public BotEvent {
+    class GroupInviteEvent : public BotEvent<GroupInviteEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::GroupInviteEvent;
         }
@@ -2397,9 +2454,8 @@ namespace MiraiCP {
               groupid(groupid) {}
     };
     /// 好友申请事件声明
-    class NewFriendRequestEvent : public BotEvent {
+    class NewFriendRequestEvent : public BotEvent<NewFriendRequestEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::NewFriendRequestEvent;
         }
@@ -2443,20 +2499,25 @@ namespace MiraiCP {
               message(message) {}
     };
     /// 新群成员加入
-    class MemberJoinEvent : public BotEvent {
+    class MemberJoinEvent : public BotEvent<MemberJoinEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::MemberJoinEvent;
         }
     public:
+        enum joinType {
+            error = 0,
+            invited = 1,
+            applied = 2,
+            rehab = 3
+        };
         /*!
         * @brief 事件类型
         *   1 - 被邀请进来
         *   2 - 主动加入
         *   3 - 原群主通过 https://huifu.qq.com/ 恢复原来群主身份并入群
         */
-        int type = 0;
+        joinType type = joinType::error;
         ///新进入的成员
         Member member;
         ///目标群
@@ -2472,14 +2533,13 @@ namespace MiraiCP {
          * @param inviterid 邀请群成员id，如果不存在和member id参数一致
          */
         MemberJoinEvent(QQID botid, int type, const Member &member, const Group &group,
-                        QQID inviterid) : BotEvent(botid), type(type), member(member),
+                        QQID inviterid) : BotEvent(botid), type(joinType(type)), member(member),
                                           group(group),
                                           inviterid(inviterid) {}
     };
     /// 群成员离开
-    class MemberLeaveEvent : public BotEvent {
+    class MemberLeaveEvent : public BotEvent<MemberLeaveEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::MemberLeaveEvent;
         }
@@ -2511,9 +2571,8 @@ namespace MiraiCP {
                                             operaterid(operaterid) {}
     };
     /// 撤回信息
-    class RecallEvent : public BotEvent {
+    class RecallEvent : public BotEvent<RecallEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::RecallEvent;
         }
@@ -2551,9 +2610,8 @@ namespace MiraiCP {
                                     groupid(groupid) {}
     };
     /// 机器人进入某群
-    class BotJoinGroupEvent : public BotEvent {
+    class BotJoinGroupEvent : public BotEvent<BotJoinGroupEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::BotJoinGroupEvent;
         }
@@ -2576,9 +2634,8 @@ namespace MiraiCP {
             : BotEvent(botid), type(type), group(std::move(group)), inviterid(inviter) {}
     };
     /// 群临时会话
-    class GroupTempMessageEvent : public BotEvent {
+    class GroupTempMessageEvent : public BotEvent<GroupTempMessageEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::GroupTempMessageEvent;
         }
@@ -2606,45 +2663,48 @@ namespace MiraiCP {
     /// 定时任务结束
     class TimeOutEvent : public MiraiCPEvent {
     public:
-        EVENT_TYPE_FUNC_GEN
+        /// 事件所附信息
+        std::string msg;
+    public:
+        explicit TimeOutEvent(std::string msg) : msg(std::move(msg)) {}
+    public:
         static eventTypes get_event_type() {
             return eventTypes::TimeOutEvent;
         }
-    public:
-        /// 事件所附信息
-        std::string msg;
-        explicit TimeOutEvent(std::string msg) : msg(std::move(msg)) {}
+        eventTypes getEventType() const override { return this->get_event_type(); }
     };
     /// 机器人上线事件
-    class BotOnlineEvent : public BotEvent {
+    class BotOnlineEvent : public BotEvent<BotOnlineEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::BotOnlineEvent;
         }
     public:
         explicit BotOnlineEvent(QQID botid) : BotEvent(botid) {}
     };
-    /// 戳一戳事件
-    class NudgeEvent : public BotEvent {
+    /*! 戳一戳事件
+    /* @warning nudgeEvent事件也会被bot自己发的Nudge触发, 可能会造成无限循环
+     */
+    class NudgeEvent : public BotEvent<NudgeEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::NudgeEvent;
         }
     public:
-        /// 谁发送的
+        ///发送人
         Contact from;
+        /// 目标
         Contact target;
-        NudgeEvent(Contact c, Contact target, QQID botid) : BotEvent(botid), from(std::move(c)),
-                                                            target(std::move(target)) {}
+        /// 发送的环境, 可能为Group / Friend
+        Contact subject;
+        NudgeEvent(const Contact &c, const Contact &target, const Contact &subject, QQID botid) : BotEvent(botid), from(c),
+                                                                                                  target(target), subject(subject) {}
     };
     /// 机器人退群事件
     /// 可能有3种类型, 主动退/被踢/解散
     /// 目前mirai的botLeave事件还不稳定暂时不支持类型
-    class BotLeaveEvent : public BotEvent {
+    class BotLeaveEvent : public BotEvent<BotLeaveEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::BotLeaveEvent;
         }
@@ -2655,7 +2715,7 @@ namespace MiraiCP {
         BotLeaveEvent(QQID g, QQID botid) : BotEvent(botid), groupid(g) {}
     };
     /// 申请加群事件, bot需为管理员或者群主
-    class MemberJoinRequestEvent : public BotEvent {
+    class MemberJoinRequestEvent : public BotEvent<MemberJoinRequestEvent> {
     private:
         std::string source;
     private:
@@ -2674,8 +2734,8 @@ namespace MiraiCP {
         /// 邀请人, 如果不存在表明这个邀请人退出了群或没有邀请人为主动进群
         std::optional<Member> inviter;
     public:
-        MemberJoinRequestEvent(std::optional<Group> g, std::optional<Member> i, QQID botid, const std::string &source)
-            : BotEvent(botid), group(std::move(g)), inviter(std::move(i)), source(source){};
+        MemberJoinRequestEvent(std::optional<Group> g, std::optional<Member> i, QQID botid, std::string source)
+            : BotEvent(botid), group(std::move(g)), inviter(std::move(i)), source(std::move(source)){};
         /// 通过
         void accept() {
             operate(this->source, this->bot.id, true);
@@ -2689,9 +2749,8 @@ namespace MiraiCP {
      * @see MessagePostSendEvent
      * @warning 在这个事件里小心使用sendMessage, 可能会触发无限递归 preSend -> sendMessage -> preSend -> ...
      * */
-    class MessagePreSendEvent : public BotEvent {
+    class MessagePreSendEvent : public BotEvent<MessagePreSendEvent> {
     public:
-        EVENT_TYPE_FUNC_GEN
         static eventTypes get_event_type() {
             return eventTypes::MessagePreSendEvent;
         }
@@ -2702,22 +2761,22 @@ namespace MiraiCP {
         MessageChain message;
         explicit MessagePreSendEvent(Contact c, MessageChain mc, QQID botid) : BotEvent(botid), target(std::move(c)), message(std::move(mc)) {}
     };
-    class MiraiCPException; // forward declaration
+    class MiraiCPExceptionBase; // forward declaration
     /// @brief 异常抛出事件
     class MiraiCPExceptionEvent : public MiraiCPEvent {
     private:
-        MiraiCPException *exceptionPtr;
+        MiraiCPExceptionBase *exceptionPtr;
     public:
-        EVENT_TYPE_FUNC_GEN
+        explicit MiraiCPExceptionEvent(MiraiCPExceptionBase *err) {
+            exceptionPtr = err;
+        }
+    public:
         static eventTypes get_event_type() {
             return eventTypes::MiraiCPExceptionEvent;
         }
-    public:
-        explicit MiraiCPExceptionEvent(MiraiCPException *err) {
-            exceptionPtr = err;
-        }
-        MiraiCPException &getException() {
-            return *exceptionPtr;
+        eventTypes getEventType() const override { return this->get_event_type(); }
+        MiraiCPExceptionBase *getException() {
+            return exceptionPtr;
         }
     };
     class Event {
@@ -2779,265 +2838,269 @@ namespace MiraiCP {
         }
     };
 } // namespace MiraiCP
-#undef EVENT_TYPE_FUNC_GEN
 #endif //MIRAICP_PRO_EVENT_H
 #ifndef MIRAICP_PRO_EXCEPTION_H
 #define MIRAICP_PRO_EXCEPTION_H
-#define MiraiCPThrow(x) throw((x).append(__FILE__, __LINE__))
+// #define MiraiCPThrow(x) throw x.append(__FILE__, __LINE__)
 #define ErrorHandle(x, y) ErrorHandle0(__FILE__, __LINE__, (x), (y))
+#define MIRAICP_EXCEPTION_WHERE __FILE__, __LINE__
+#if defined(_MSC_VER)
+#define ShouldNotUse(msg) _Pragma("warning(error:4996)") [[deprecated(msg)]] _Pragma("warning(warning:4996)")
+#else
+#if defined(__GNUC__)
+#define ShouldNotUse(msg) [[deprecated(msg)]] __attribute__((error(msg)))
+#else
+#define ShouldNotUse(msg)
+#endif
+#endif
 #include <exception>
 #include <string>
 namespace MiraiCP {
-    /// @brief 总异常抽象类
-    /// @interface MiraiCPException
-    class MiraiCPException : public std::exception {
+    /// @brief 总异常抽象类，用于一般捕获，不要直接抛出该类，不知道抛出什么的时候请抛出 MiraiCPException
+    /// @interface MiraiCPExceptionBase
+    class MiraiCPExceptionBase : public ::std::exception {
+    protected:
         using string = std::string;
     protected:
+        /// @brief 异常内容
         string re;
     public:
-        /// 异常的类型
-        virtual string exceptionType() const { return "MiraiCPException"; }
-    public:
+        /// @brief 发生异常的行号
         int lineNum = 0;
+        /// @brief 发生异常的文件名
         string filename;
-        //构造时传入类型字符串
-        explicit MiraiCPException(std::string description = "") {
-            if (description.empty())
-                this->re = MiraiCPException::exceptionType() + ":MiraiCP异常";
-            else
-                this->re = MiraiCPException::exceptionType() + ":" + std::move(description);
-        }
+    protected:
+        /// 受保护构造函数，供子类调用
+        MiraiCPExceptionBase(string _filename, int _lineNum) : filename(std::move(_filename)), lineNum(_lineNum) {}
+    public:
+        ~MiraiCPExceptionBase() override = default;
+    protected:
         /// @brief 异常事件广播
-        class ExceptionBroadcasting {
-        public:
-            MiraiCPException *e;
-            explicit ExceptionBroadcasting(MiraiCPException *ex) : e(ex) {}
-            ~ExceptionBroadcasting();
-        };
-        /// 报错位置信息, 由MiraiThrow宏传递
-        MiraiCPException append(string name, int line) {
-            lineNum = line;
-            filename = std::move(name);
-            // destroy this object immediately, to call the destructor of `ExceptionBroadcasting`
-            ExceptionBroadcasting(this);
-            return *this;
-        }
+        void exception_broadcast();
+    public:
         /// 异常信息
         const char *what() const noexcept override { return re.c_str(); }
-        /// basicRaise 基本抛出方法，子类重写该方法
-        virtual void basicRaise() const;
         /// 实际抛出方法
         void raise() const;
+    public: // 暴露的接口
+        /// basicRaise 基本抛出方法，子类重写该方法
+        virtual void basicRaise() const;
+        // CRTP实现一次，调用静态的exceptionType
+        /// 获取异常类型，通用接口
+        virtual string getExceptionType() = 0;
+        // 每个子类需要单独实现该静态方法
+        /// 返回异常的类型，该静态方法无法正确实现多态，请使用 getExceptionType
+        /// @see getExceptionType
+        static string exceptionType() { return "MiraiCPException"; }
     };
-    /// 文件读取异常.
-    /// @see MiraiCPException
-    class UploadException : public MiraiCPException {
-    private:
-        std::string description;
-    public:
-        explicit UploadException(const std::string &text) {
-            this->description = "上传(图片/文件)异常" + text;
-            this->re = this->exceptionType() + this->description;
+    /// @brief 总异常CRTP抽象类，不要直接抛出该类，不知道抛出什么的时候请抛出 MiraiCPException
+    /// @interface MiraiCPExceptionCRTP
+    /// @note 请勿给该类增加新的属性。如果要增加属性应在 MiraiCPExceptionBase 中增加
+    template<class T>
+    class MiraiCPExceptionCRTP : public MiraiCPExceptionBase {
+    protected:
+        /// 委托构造函数
+        MiraiCPExceptionCRTP(string _filename, int _lineNum) : MiraiCPExceptionBase(std::move(_filename), _lineNum) {
+            exception_broadcast();
         }
-        std::string exceptionType() const override { return "UploadException"; }
+    public:
+        // 构造时传入类型字符串
+        // 最好不要调用该构造函数
+        explicit MiraiCPExceptionCRTP(const string &description, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            if (description.empty())
+                this->re = T::exceptionType() + ":MiraiCP异常";
+            else
+                this->re = T::exceptionType() + ":" + description;
+        }
+    public:
+        // CRTP类型获取实现
+        string getExceptionType() override { return T::exceptionType(); }
+    };
+    /// @brief 通用MiraiCP异常
+    /// @param const string &description, string _filename, int _lineNum
+    /// @see MiraiCPExceptionBase
+    typedef MiraiCPExceptionCRTP<MiraiCPExceptionBase> MiraiCPException;
+    /// 文件读取异常.
+    /// @see MiraiCPExceptionBase
+    class UploadException : public MiraiCPExceptionCRTP<UploadException> {
+    public:
+        explicit UploadException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "上传(图片/文件)异常" + text;
+        }
+        static std::string exceptionType() { return "UploadException"; }
     };
     /// 通常为Mirai返回
-    /// @see MiraiCPException
-    class IllegalStateException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class IllegalStateException : public MiraiCPExceptionCRTP<IllegalStateException> {
     public:
-        explicit IllegalStateException(const std::string &text) : MiraiCPException("IllegalStateException") {
-            this->description = "状态异常:" + text;
-            this->re = IllegalStateException::exceptionType() + this->description;
+        explicit IllegalStateException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "状态异常:" + text;
         }
-        std::string exceptionType() const override { return "IllegalStateException"; }
+        static std::string exceptionType() { return "IllegalStateException"; }
     };
     /// 内部异常, 通常为json读写问题
-    /// @see MiraiCPException
-    class APIException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class APIException : public MiraiCPExceptionCRTP<APIException> {
     public:
-        explicit APIException(const std::string &text) {
-            this->description = "MiraiCP内部无法预料的错误:" + text;
-            this->re = APIException::exceptionType() + this->description;
+        explicit APIException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "MiraiCP内部无法预料的错误:" + text;
         }
-        std::string exceptionType() const override { return "APIException"; }
+        static string exceptionType() { return "APIException"; }
     };
     /// 机器人操作异常
-    /// @see MiraiCPException
-    class BotException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class BotException : public MiraiCPExceptionCRTP<BotException> {
     public:
-        explicit BotException(std::string d = "没有权限执行该操作") {
-            this->description = std::move(d);
-            // BotIsBeingMutedException doesn't have a constructor, use `this`
-            this->re = this->exceptionType() + this->description;
+        explicit BotException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            re = "没有权限执行该操作";
         }
-        std::string exceptionType() const override { return "BotException"; }
+        explicit BotException(string d, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            re = std::move(d);
+        }
+        static string exceptionType() { return "BotException"; }
     };
     /// 被禁言异常, 通常发生于发送信息
-    class BotIsBeingMutedException : public BotException {
+    class BotIsBeingMutedException : public MiraiCPExceptionCRTP<BotIsBeingMutedException> {
     public:
         /// 剩余禁言时间, 单位秒
         int timeRemain;
     public:
-        explicit BotIsBeingMutedException(int t) : BotException("发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t)) {
+        explicit BotIsBeingMutedException(int t, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t);
             timeRemain = t;
         }
-        std::string exceptionType() const override { return "BotIsBeingMutedException"; }
+        static string exceptionType() { return "BotIsBeingMutedException"; }
     };
     /// 禁言异常
-    /// @see MiraiCPException
-    class MuteException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class MuteException : public MiraiCPExceptionCRTP<MuteException> {
     public:
         /*
         *	 禁言时间超出0s~30d
         */
-        MuteException() {
-            this->description = "禁言时长不在0s~30d中间";
-            this->re = MuteException::exceptionType() + this->description;
+        MuteException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "禁言时长不在0s~30d中间";
         }
-        std::string exceptionType() const override { return "MuteException"; }
+        static string exceptionType() { return "MuteException"; }
     };
     /// 获取群成员错误
-    /// @see MiraiCPException
-    class MemberException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class MemberException : public MiraiCPExceptionCRTP<MemberException> {
     public:
-        int type = 0;
+        enum MemberExceptionType : int {
+            OtherType,
+            NoSuchGroup,
+            NoSuchMember
+        };
+        MemberExceptionType type = OtherType;
         /*
         *   "1" - 找不到群
         *	"2" - 找不到群成员
         */
-        explicit MemberException(int type) {
-            this->type = type;
+        explicit MemberException(int _type, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            type = MemberExceptionType(_type);
             switch (type) {
-                case 1:
-                    this->description = "找不到群";
+                case NoSuchGroup:
+                    this->re = "找不到群";
                     break;
-                case 2:
-                    this->description = "找不到群成员";
+                case NoSuchMember:
+                    this->re = "找不到群成员";
                     break;
                 default:
                     break;
             }
-            this->re = MemberException::exceptionType() + this->description;
+            this->re = "";
         }
-        std::string exceptionType() const override { return "MemberException"; }
+        static string exceptionType() { return "MemberException"; }
     };
     /// 获取群成员错误
-    /// @see MiraiCPException
-    class FriendException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class FriendException : public MiraiCPExceptionCRTP<FriendException> {
     public:
         /*
         *   找不到好友
         */
-        FriendException() : MiraiCPException("FriendException") {
-            this->description = "找不到好友";
-            this->re = FriendException::exceptionType() + this->description;
+        FriendException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "找不到好友";
         }
-        std::string exceptionType() const override { return "FriendException"; }
+        static string exceptionType() { return "FriendException"; }
     };
     /// 获取群错误
-    /// @see MiraiCPException
-    class GroupException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class GroupException : public MiraiCPExceptionCRTP<GroupException> {
     public:
-        GroupException() {
-            this->description = "C++:找不到群";
-            this->re = GroupException::exceptionType() + this->description;
+        GroupException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "C++:找不到群";
         }
-        std::string exceptionType() const override { return "GroupException"; }
+        static string exceptionType() { return "GroupException"; }
     };
     /// 撤回异常
-    /// @see MiraiCPException
-    class RecallException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class RecallException : public MiraiCPExceptionCRTP<RecallException> {
     public:
-        RecallException() {
-            this->description = "该消息已经被撤回";
-            this->re = RecallException::exceptionType() + this->description;
+        RecallException(string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = "该消息已经被撤回";
         }
-        std::string exceptionType() const override { return "RecallException"; }
+        static string exceptionType() { return "RecallException"; }
     };
     /// 远程资源出现问题
-    /// @see MiraiCPException
-    class RemoteAssetException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class RemoteAssetException : public MiraiCPExceptionCRTP<RemoteAssetException> {
     public:
-        explicit RemoteAssetException(std::string e) {
-            this->description = std::move(e);
-            this->re = RemoteAssetException::exceptionType() + this->description;
+        explicit RemoteAssetException(string e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = std::move(e);
         }
-        std::string exceptionType() const override { return "RemoteAssetException"; }
+        static string exceptionType() { return "RemoteAssetException"; }
     };
     /// 参数错误
-    /// @see MiraiCPException
-    class IllegalArgumentException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class IllegalArgumentException : public MiraiCPExceptionCRTP<IllegalArgumentException> {
     public:
-        explicit IllegalArgumentException(std::string e) {
-            this->description = std::move(e);
-            this->re = IllegalArgumentException::exceptionType() + this->description;
+        explicit IllegalArgumentException(string e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = std::move(e);
         }
-        std::string exceptionType() const override { return "IllegalArgumentException"; }
+        static string exceptionType() { return "IllegalArgumentException"; }
     };
     /// 超时
-    /// @see MiraiCPException
-    class TimeOutException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class TimeOutException : public MiraiCPExceptionCRTP<TimeOutException> {
     public:
-        explicit TimeOutException(std::string e) {
-            this->description = std::move(e);
-            this->re = TimeOutException::exceptionType() + this->description;
+        explicit TimeOutException(std::string e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            this->re = std::move(e);
         }
-        std::string exceptionType() const override { return "TimeOutException"; }
+        static string exceptionType() { return "TimeOutException"; }
     };
     /// 事件被取消, 一般出现在发送消息时在preSendMessageEvent取消的时候抛出
-    /// @see MiraiCPException
-    class EventCancelledException : public MiraiCPException {
-    private:
-        std::string description;
+    /// @see MiraiCPExceptionBase
+    class EventCancelledException : public MiraiCPExceptionCRTP<EventCancelledException> {
     public:
-        explicit EventCancelledException(const std::string &msg) {
-            description = msg;
-            re = EventCancelledException::exceptionType() + msg;
+        explicit EventCancelledException(const string &msg, string _filename, int _lineNum) : MiraiCPExceptionCRTP(std::move(_filename), _lineNum) {
+            re = msg;
         }
-        std::string exceptionType() const override { return "EventCancelledException"; }
+        static string exceptionType() { return "EventCancelledException"; }
     };
     inline void ErrorHandle0(const std::string &name, int line, const std::string &re, const std::string &ErrorMsg = "") {
         if (re == "EF")
-            throw FriendException().append(name, line);
+            throw FriendException(name, line);
         if (re == "EG")
-            throw GroupException().append(name, line);
+            throw GroupException(name, line);
         if (re == "EM")
-            throw MemberException(1).append(name, line);
+            throw MemberException(1, name, line);
         if (re == "EMM")
-            throw MemberException(2).append(name, line);
+            throw MemberException(2, name, line);
         if (re == "EB")
-            throw BotException("找不到bot:" + re).append(name, line);
+            throw BotException("找不到bot:" + re, name, line);
         if (re == "EA")
-            throw APIException(ErrorMsg).append(name, line);
+            throw APIException(ErrorMsg, name, line);
         if (re == "EC")
-            throw EventCancelledException("发送信息被取消").append(name, line);
+            throw EventCancelledException("发送信息被取消", name, line);
         if (re == "ET")
-            throw TimeOutException("发送信息超时").append(name, line);
+            throw TimeOutException("发送信息超时", name, line);
+        if (re == "EP")
+            throw BotException(name, line);
         // equal to Tools::start_with
         if (re.rfind("EBM", 0) == 0)
-            throw BotIsBeingMutedException(std::stoi(re.substr(3))).append(name, line);
+            throw BotIsBeingMutedException(std::stoi(re.substr(3)), name, line);
     }
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_EXCEPTION_H
@@ -3141,24 +3204,28 @@ namespace MiraiCP {
 // #include "Contact.h"
 namespace MiraiCP {
     /// 好友类声明
-    class Friend : public Contact {
+    class Friend : public Contact, INudgeSupport {
     public:
         /// 删除好友(delete是C++关键字
         void deleteFriend(JNIEnv *env = nullptr);
-        void refreshInfo(JNIEnv *env = nullptr) override;
+        void refreshInfo(JNIEnv *env = nullptr);
         /*!
          * @brief 发送戳一戳
          * @warning 发送戳一戳的前提是登录该bot的协议是android_phone/ipad, 否则抛出IllegalStateException
          * @throw MiraiCP::BotException, MiraiCP::IllegalStateException
          */
-        void sendNudge();
+        void sendNudge() override;
         /*!
          * @brief 构建好友对象
          * @param friendid q号
          * @param botid 对应机器人id
          */
         explicit Friend(QQID friendid, QQID botid, JNIEnv * = nullptr);
-        explicit Friend(Contact c) : Contact(std::move(c)) { refreshInfo(); };
+        explicit Friend(const Contact &c) : Contact(c) {
+            if (c.type() != 1)
+                throw IllegalArgumentException("无法从 type==" + std::to_string(c.type()) + " 转为 type == 1(friend)", MIRAICP_EXCEPTION_WHERE);
+            refreshInfo();
+        };
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_FRIEND_H
@@ -3201,7 +3268,7 @@ namespace MiraiCP {
      *   @endcode
      */
     class Group : public Contact {
-    public:
+    public: // member classes and structs
         /// 群公告参数
         class AnnouncementParams {
         public:
@@ -3250,7 +3317,7 @@ namespace MiraiCP {
             /// @throw BotException
             void deleteThis();
             /// 反序列化
-            static OnlineAnnouncement deserializeFromJson(nlohmann::json);
+            static OnlineAnnouncement deserializeFromJson(const nlohmann::json &);
             OnlineAnnouncement(const std::string &content, AnnouncementParams &params,
                                QQID groupid, QQID senderid, QQID botid,
                                long long int publicationTime, const std::string &fid, int confirmNum,
@@ -3287,8 +3354,27 @@ namespace MiraiCP {
             /// 允许匿名聊天
             bool isAnonymousChatEnabled{};
         };
+        /// 群文件的简短描述
+        struct file_short_info {
+            // 路径带文件名
+            std::string path;
+            // 唯一id
+            std::string id;
+        };
+    public: // attrs
         /// 群设置
         GroupSetting setting;
+    public: // constructors
+        ///  @brief 构建以群号构建群对象
+        /// @param groupid 群号
+        /// @param botid 机器人id
+        Group(QQID groupid, QQID botid, JNIEnv * = nullptr);
+        explicit Group(const Contact &c) : Contact(c) {
+            if (c.type() != 2)
+                throw IllegalArgumentException("无法从 type==" + std::to_string(c.type()) + " 转为 type == 2(group)", MIRAICP_EXCEPTION_WHERE);
+            refreshInfo();
+        }
+    public: // methods
         /**
          * @brief 更新群设置, 即覆盖服务器上的群设置
          * @details 从服务器拉去群设置用refreshInfo
@@ -3306,17 +3392,13 @@ namespace MiraiCP {
         std::string MemberListToString();
         /// 取群主
         Member getOwner(JNIEnv * = nullptr);
-        ///  @brief 构建以群号构建群对象
-        /// @param groupid 群号
-        /// @param botid 机器人id
-        Group(QQID groupid, QQID botid, JNIEnv * = nullptr);
-        explicit Group(Contact c) : Contact(std::move(c)) { refreshInfo(); };
         /// 取群成员
         Member getMember(QQID memberid, JNIEnv *env = nullptr);
+        Member operator[](QQID id);
         /// 取群公告列表
         std::vector<OnlineAnnouncement> getAnnouncementsList(JNIEnv *env);
         /// 刷新群聊信息
-        void refreshInfo(JNIEnv *env = nullptr) override;
+        void refreshInfo(JNIEnv *env = nullptr);
         void quit(JNIEnv *env = nullptr);
         /*!
         @brief 上传并发送远程(群)文件
@@ -3349,13 +3431,6 @@ namespace MiraiCP {
         RemoteFile getFileByFile(const RemoteFile &file, JNIEnv *env = nullptr) {
             return getFileById(file.id, env);
         }
-        /// 群文件的简短描述
-        struct file_short_info {
-            // 路径带文件名
-            std::string path;
-            // 唯一id
-            std::string id;
-        };
         /*!
          * 获取path路径下全部文件信息
          * @param path - 远程路径
@@ -3583,7 +3658,7 @@ namespace MiraiCP {
         });
      * @endcode
      */
-    class Member : public Contact {
+    class Member : public Contact, INudgeSupport {
     public:
         /// @brief 权限等级
         ///     - OWNER群主 为 2
@@ -3601,14 +3676,16 @@ namespace MiraiCP {
         /// @param botid 机器人id
         explicit Member(QQID qqid, QQID groupid, QQID botid,
                         JNIEnv * = nullptr);
-        explicit Member(Contact c) : Contact(std::move(c)) {
+        explicit Member(const Contact &c) : Contact(c) {
+            if (c.type() != 3)
+                throw IllegalArgumentException("无法从 type==" + std::to_string(c.type()) + " 转为 type == 3(member)", MIRAICP_EXCEPTION_WHERE);
             this->isAnonymous = this->_anonymous;
             refreshInfo();
         };
         /// 是否是匿名群成员, 如果是匿名群成员一些功能会受限
         bool isAnonymous = false;
         /// 重新获取(刷新)群成员信息
-        void refreshInfo(JNIEnv *env = nullptr) override;
+        void refreshInfo(JNIEnv *env = nullptr);
         /// 发送语音
         MessageSource sendVoice(const std::string &path, JNIEnv *env = nullptr) {
             return Contact::sendVoice0(path, env);
@@ -3635,12 +3712,15 @@ namespace MiraiCP {
             /*返回at这个人的miraicode*/
             return At(this->id());
         }
+        /// 更改群名片
+        /// @throw MiraiCP::BotException 如果没权限时
+        void changeNameCard(std::string_view newName, JNIEnv* = nullptr);
         /*!
          * @brief 发送戳一戳
          * @warning 发送戳一戳的前提是登录该bot的协议是android_phone/ipad, 否则抛出IllegalStateException
          * @throw MiraiCP::BotException, MiraiCP::IllegalStateException
          */
-        void sendNudge();
+        void sendNudge() override;
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_MEMBER_H
@@ -3677,10 +3757,10 @@ namespace MiraiCP {
             T get() const {
                 static_assert(std::is_base_of_v<SingleMessage, T>, "只支持SingleMessage的派生类");
                 if (T::type() != this->type())
-                    MiraiCPThrow(IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()]));
+                    throw IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()], MIRAICP_EXCEPTION_WHERE);
                 T *re = static_cast<T *>(this->content.get());
                 if (re == nullptr)
-                    MiraiCPThrow(IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()]));
+                    throw IllegalArgumentException("cannot convert from " + SingleMessage::messageType[this->type()] + " to " + SingleMessage::messageType[T::type()], MIRAICP_EXCEPTION_WHERE);
                 return *re;
             }
             bool operator==(const Message &m) const {
@@ -3893,9 +3973,10 @@ namespace MiraiCP {
 #endif //MIRAICP_PRO_MESSAGECHAIN_H
 #ifndef MIRAICP_PRO_MESSAGESOURCE_H
 #define MIRAICP_PRO_MESSAGESOURCE_H
-// #include "MiraiCode.h"
+#include <string>
 #include <jni.h>
 namespace MiraiCP {
+    class MiraiCodeable; // forward declaration
     using QQID = unsigned long long;
     /*! 消息源声明
      * @example 撤回信息(check in version 2.9.0)
@@ -4058,6 +4139,7 @@ namespace MiraiCP {
 #include <optional>
 #include <sstream>
 // #include "MessageSource.h"
+// #include "MiraiCode.h"
 namespace MiraiCP {
     /// 用serviceMessage的分享信息
     struct URLSharer {
@@ -4076,7 +4158,7 @@ namespace MiraiCP {
     class SingleMessage : public MiraiCodeable {
     public:
         virtual ~SingleMessage() = default;
-        static std::map<int, std::string> messageType;
+        static std::unordered_map<int, std::string> messageType;
         virtual nlohmann::json toJson() const {
             nlohmann::json re;
             re["key"] = "miraicode";
@@ -4343,8 +4425,8 @@ namespace MiraiCP {
     class QuoteReply : public SingleMessage {
     public:
         static int type() { return -2; }
-        /// 不可直接发送, 发送引用信息用MessageChain.quoteAndSendMessage
-        [[deprecated("cannot use, use MessageChain.quote")]] std::string toMiraiCode() const override {
+        // 不可直接发送, 发送引用信息用MessageChain.quoteAndSendMessage
+        ShouldNotUse("don't have MiraiCode, use MessageChain.quote instead") std::string toMiraiCode() const override {
             return "";
         }
         /// 引用信息的MessageSource
@@ -4606,10 +4688,24 @@ namespace MiraiCP {
 #endif //MIRAICP_PRO_THREADMANAGER_H
 #ifndef MIRAICP_PRO_TOOLS_H
 #define MIRAICP_PRO_TOOLS_H
+#include <functional>
 #include <jni.h>
 #include <sstream>
 #include <string>
 #include <vector>
+#if defined(__clang__) || defined(__GNUC__)
+#define MIRAICP_CPP_STANDARD __cplusplus
+#elif defined(_MSC_VER)
+#define MIRAICP_CPP_STANDARD _MSVC_LANG
+#endif
+#define MiraiCP_defer(code)                              \
+    auto __defered_statement_wrapper__ = [&]() { code }; \
+    Tools::MiraiCPDefer<void> __defered_object__(__defered_statement_wrapper__);
+//#if MIRAICP_CPP_STANDARD >= 201703L
+//#define get_return_type std::invoke_result_t
+//#else
+//#define get_return_type std::result_of_t
+//#endif
 namespace MiraiCP {
     /// @brief 工具类声明, 常用的一些转换工具, 如需转码使用std::filesystem
     /// @class Tools
@@ -4673,15 +4769,29 @@ namespace MiraiCP {
         bool iequal(std::string_view str1, std::string_view str2);
         /// from https://www.zhihu.com/question/36642771, delim is regex(ignore last `+`)
         std::vector<std::string> split(const std::string &text, const std::string &delim);
+        /// defer class
+        /// @see MiraiCP_defer
+        template<typename RT_TYPE>
+        class MiraiCPDefer {
+        public:
+            std::function<RT_TYPE()> defer_func;
+            template<class F>
+            MiraiCPDefer(F &&func) : defer_func(func) {
+            }
+            virtual ~MiraiCPDefer() {
+                defer_func();
+            }
+        };
     }; // namespace Tools
 } // namespace MiraiCP
+// #undef get_return_type
 #endif //MIRAICP_PRO_TOOLS_H
 #ifndef MIRAICP_PRO_UTILS_H
 #define MIRAICP_PRO_UTILS_H
 // #include "CPPPlugin.h"
 // #include "Config.h"
 namespace MiraiCP {
-    const std::string MiraiCPVersion = "v2.10.0";
+    const std::string MiraiCPVersion = "v2.11.0-M1";
     /*!
      * @brief 定时任务, 在一定时间后广播**一次**TimeOutEvent
      * @param time 在多少毫秒后执行
