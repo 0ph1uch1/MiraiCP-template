@@ -766,7 +766,7 @@ namespace MiraiCP {
         CommandManager() = default;
         std::vector<std::shared_ptr<IRawCommand>> commandList;
     public:
-        std::shared_ptr<IRawCommand> operator[](const int &index) { return commandList[index]; }
+        std::shared_ptr<IRawCommand> &operator[](const int &index) { return commandList[index]; }
         /*!
          * @brief 注册一条指令
          * @param command 指令
@@ -2718,12 +2718,16 @@ namespace MiraiCP {
     class MemberJoinRequestEvent : public BotEvent<MemberJoinRequestEvent> {
     private:
         std::string source;
-    private:
-        void operate(const std::string &s,
+    public:
+        /**
+         * @brief 底层通过MemberJoinRequest
+         * @param s 序列化后的文本
+         */
+        static void operate(std::string_view s,
                      QQID botid,
                      bool sign,
                      const std::string &msg = "",
-                     JNIEnv *env = nullptr) const;
+                     JNIEnv *env = nullptr) ;
     public:
         static eventTypes get_event_type() {
             return eventTypes::MemberJoinRequestEvent;
@@ -2733,9 +2737,11 @@ namespace MiraiCP {
         std::optional<Group> group;
         /// 邀请人, 如果不存在表明这个邀请人退出了群或没有邀请人为主动进群
         std::optional<Member> inviter;
+        /// 申请人id
+        QQID requesterId;
     public:
-        MemberJoinRequestEvent(std::optional<Group> g, std::optional<Member> i, QQID botid, std::string source)
-            : BotEvent(botid), group(std::move(g)), inviter(std::move(i)), source(std::move(source)){};
+        MemberJoinRequestEvent(std::optional<Group> g, std::optional<Member> i, QQID botid, QQID requesterId, std::string source)
+            : BotEvent(botid), group(std::move(g)), inviter(std::move(i)), source(std::move(source)), requesterId(requesterId){};
         /// 通过
         void accept() {
             operate(this->source, this->bot.id, true);
@@ -3162,7 +3168,7 @@ namespace MiraiCP {
         */
         ForwardedMessage(Contact *c, std::initializer_list<ForwardedNode> nodes);
         ForwardedMessage(Contact *c, std::vector<ForwardedNode> nodes);
-        ForwardedNode operator[](int index) { return nodes[index]; }
+        ForwardedNode &operator[](int index) { return nodes[index]; }
         ForwardedMessage plus(const ForwardedNode &a) {
             ForwardedMessage tmp(*this);
             tmp.nodes.push_back(a);
@@ -4820,5 +4826,13 @@ namespace MiraiCP {
     inline void enrollPlugin0(CPPPlugin *p) {
         CPPPlugin::plugin = p;
     }
+    namespace JNIApi {
+        // todo 暴露了一些接口
+        JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content);
+        JNIEXPORT jstring returnNull();
+        JNIEXPORT jobject PluginDisable(JNIEnv *env, jobject job);
+        JNIEXPORT jstring Verify(JNIEnv *env, jobject, jstring id);
+        int registerMethods(JNIEnv *env, const char *className, JNINativeMethod *gMethods, int numMethods);
+    } // namespace JNIApi
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_UTILS_H
