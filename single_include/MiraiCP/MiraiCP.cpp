@@ -19,7 +19,7 @@
 //from Bot.cpp
 namespace MiraiCP {
     Group Bot::getGroup(QQID groupid, JNIEnv *env) const {
-        return Group(groupid, this->id, env);
+        return {groupid, this->id, env};
     }
     Friend Bot::getFriend(QQID i, JNIEnv *env) const {
         return Friend(i, this->id, env);
@@ -40,7 +40,7 @@ namespace MiraiCP {
         nlohmann::json j;
         j["botid"] = this->id;
         std::string temp = Config::koperation(Config::QueryBFL, j, env);
-        return Tools::StringToVector(temp);
+        return Tools::StringToVector(std::move(temp));
     }
     std::string Bot::FriendListToString() {
         return Tools::VectorToString(getFriendList());
@@ -49,7 +49,7 @@ namespace MiraiCP {
         nlohmann::json j;
         j["botid"] = this->id;
         std::string temp = Config::koperation(Config::QueryBGL, j, env);
-        return Tools::StringToVector(temp);
+        return Tools::StringToVector(std::move(temp));
     }
     std::string Bot::GroupListToString() const {
         return Tools::VectorToString(getGroupList());
@@ -190,7 +190,7 @@ namespace MiraiCP {
         if (r == "E1")
             throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
         json re = json::parse(r);
-        return MessageChain::deserializationFromMiraiCode(re["message"]).plus(MessageSource::deserializeFromString(re["messageSource"]));
+        return MessageChain::deserializationFromMessageSourceJson(json::parse(re["messageSource"].get<std::string>())).plus(MessageSource::deserializeFromString(re["messageSource"]));
     }
     MessageChain GroupMessageEvent::nextMessage(long time, bool halt, JNIEnv *env) const {
         json j;
@@ -201,7 +201,7 @@ namespace MiraiCP {
         if (r == "E1")
             throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
         json re = json::parse(r);
-        return MessageChain::deserializationFromMiraiCode(re["message"]).plus(MessageSource::deserializeFromString(re["messageSource"]));
+        return MessageChain::deserializationFromMessageSourceJson(json::parse(re["messageSource"].get<std::string>())).plus(MessageSource::deserializeFromString(re["messageSource"]));
     }
     MessageChain GroupMessageEvent::senderNextMessage(long time, bool halt, JNIEnv *env) const {
         json j;
@@ -239,11 +239,9 @@ namespace MiraiCP {
     }
     void MiraiCPExceptionBase::raise() const {
         this->basicRaise();
-        if (!filename.empty() && lineNum != 0)
+        if (!filename.empty() && lineNum != 0) {
             Logger::logger.error("文件名:" + filename + "\n行号:" + std::to_string(lineNum));
-    }
-    void MiraiCPExceptionBase::exception_broadcast() {
-        Event::processor.broadcast<MiraiCPExceptionEvent>(MiraiCPExceptionEvent(this));
+        }
     }
 } // namespace MiraiCP
 //from ForwardedMessage.cpp
@@ -256,16 +254,18 @@ namespace MiraiCP {
             json temp;
             temp["id"] = node.id;
             temp["time"] = node.time;
-            if (node.forwardedMsg != nullptr) {
+            if (node.isForwarded()) {
                 temp["isForwardedMessage"] = true;
-                temp["message"] = node.forwardedMsg->nodesToJson().dump();
+                temp["message"] = std::get<std::shared_ptr<ForwardedMessage>>(node.message)->nodesToJson().dump();
+                if (display.has_value())
+                    temp["display"] = display->toJson();
             } else
-                temp["message"] = node.message.toMiraiCode();
+                temp["message"] = std::get<MessageChain>(node.message).toMiraiCode();
             temp["name"] = node.name;
-            value.push_back(temp);
+            value.emplace_back(std::move(temp));
         }
         json tmp = this->sendmsg;
-        tmp["value"] = value;
+        tmp["value"] = std::move(value);
         return tmp;
     }
     //发送这个聊天记录
@@ -278,41 +278,69 @@ namespace MiraiCP {
         text["content"] = this->nodesToJson();
         temp["text"] = text.dump();
         temp["botid"] = c->botid();
+        if (display.has_value())
+            temp["display"] = display->toJson();
         std::string re = Config::koperation(Config::Buildforward, temp, env);
         ErrorHandle(re, "");
         return MessageSource::deserializeFromString(re);
     }
-    ForwardedMessage::ForwardedMessage(Contact *c, std::initializer_list<ForwardedNode> nodes) : ForwardedMessage(c, std::vector(nodes)) {}
-    ForwardedMessage::ForwardedMessage(Contact *c, std::vector<ForwardedNode> nodes) : nodes(std::move(nodes)) {
-        json root;
-        root["type"] = c->type();
-        root["id"] = c->id();
-        root["groupid"] = c->groupid();
-        sendmsg = root;
-    }
-    OnlineForwardedMessage OnlineForwardedMessage::deserializationFromMessageSourceJson(json j) {
+    ForwardedMessage ForwardedMessage::deserializationFromMessageSourceJson(const json &j) {
         std::vector<ForwardedNode> nodes;
-        for (json a: j[1]["nodeList"])
-            nodes.emplace_back(a["senderId"], a["senderName"], MessageChain::deserializationFromMessageSourceJson(a["messageChain"], false), a["time"]);
-        return OnlineForwardedMessage(j[0]["origin"], j[0]["resourceId"], nodes);
+        try {
+            for (auto &&a: j) {
+                if (a["messageChain"][0].contains("kind") && a["messageChain"][0]["kind"] == "FORWARD") {
+                    nodes.emplace_back(a["senderId"], a["senderName"], ForwardedMessage::deserializationFromMessageSourceJson(a["messageChain"][1]["nodeList"]), a["time"], ForwardedMessageDisplayStrategy::defaultStrategy());
+                } else {
+                    nodes.emplace_back(a["senderId"], a["senderName"], MessageChain::deserializationFromMessageSourceJson(a["messageChain"], false), a["time"]);
+                }
+            }
+        } catch (json::exception &e) {
+            throw APIException("ForwardedMessage格式化异常", MIRAICP_EXCEPTION_WHERE);
+        }
+        return {std::move(nodes), ForwardedMessageDisplayStrategy::defaultStrategy()};
     }
+    OnlineForwardedMessage OnlineForwardedMessage::deserializationFromMessageSourceJson(const json &j) {
+        std::vector<ForwardedNode> nodes;
+        try {
+            for (auto &&a: j[1]["nodeList"]) {
+                if (a["messageChain"][0].contains("kind") && a["messageChain"][0]["kind"] == "FORWARD") {
+                    nodes.emplace_back(a["senderId"], a["senderName"], ForwardedMessage::deserializationFromMessageSourceJson(a["messageChain"][1]["nodeList"]), a["time"], ForwardedMessageDisplayStrategy::defaultStrategy());
+                } else {
+                    nodes.emplace_back(a["senderId"], a["senderName"], MessageChain::deserializationFromMessageSourceJson(a["messageChain"], false), a["time"]);
+                }
+            }
+        } catch (json::parse_error &e) {
+            throw APIException("OnlineForwardedMessage格式化异常", MIRAICP_EXCEPTION_WHERE);
+        }
+        //if (j[0].contains("resourceId") && !j[0]["resourceId"].is_null())
+        return OnlineForwardedMessage(j[0]["origin"], /*j[0]["resourceId"],*/ std::move(nodes));
+        //else
+        // return OnlineForwardedMessage(j[0]["origin"], std::nullopt, std::move(nodes));
+    }
+    ForwardedNode::ForwardedNode(QQID id, std::string name, ForwardedMessage _message, int t, std::optional<ForwardedMessageDisplayStrategy> display)
+        : id(id), name(std::move(name)),
+          message(std::make_shared<ForwardedMessage>(std::move(_message))),
+          time(t), isForwardedMessage(true), display(std::move(display)) {}
+    /*
     ForwardedNode::ForwardedNode(Contact *c, MessageChain message, int t) : id(c->id()), name(c->nickOrNameCard()),
                                                                             message(std::move(message)),
                                                                             time(t) {}
-    ForwardedNode::ForwardedNode(Contact *c, ForwardedMessage message, int t) : id(c->id()), name(c->nickOrNameCard()),
-                                                                                forwardedMsg(std::make_shared<ForwardedMessage>(message)),
-                                                                                time(t) {}
-    ForwardedNode::ForwardedNode(QQID id, const std::string &name, ForwardedMessage message, int t) : id(id), name(name), forwardedMsg(std::make_shared<ForwardedMessage>(message)), time(t) {}
+    ForwardedNode::ForwardedNode(QQID id, std::string name, ForwardedMessage &message, int t) : id(id), name(std::move(name)), forwardedMsg(&message), time(t) {}
+    */
     bool OnlineForwardedMessage::operator==(const OnlineForwardedMessage &m) const {
         if (this->nodelist.size() != m.nodelist.size())
             return false;
-        for (int i = 0; i < this->nodelist.size(); i++)
-            if (this->nodelist[i].message != m[i].message)
-                return false;
-        return true;
+        int i = 0;
+        return std::all_of(this->nodelist.begin(), this->nodelist.end(), [&](const auto &n) {
+            return n.message == m[i++].message;
+        });
+        //        for (int i = 0; i < this->nodelist.size(); i++)
+        //            if (this->nodelist[i].message != m[i].message)
+        //                return false;
+        //        return true;
     }
-    ForwardedMessage OnlineForwardedMessage::toForwardedMessage(Contact *c) {
-        return {c, this->nodelist};
+    ForwardedMessage OnlineForwardedMessage::toForwardedMessage(std::optional<ForwardedMessageDisplayStrategy> display) const {
+        return {this->nodelist, std::move(display)};
     }
 } // namespace MiraiCP
 //from Friend.cpp
@@ -320,7 +348,7 @@ namespace MiraiCP {
     using json = nlohmann::json;
     /*好友类实现*/
     Friend::Friend(QQID id, QQID botid, JNIEnv *env) : Contact() {
-        this->_type = 1;
+        this->_type = MIRAI_FRIEND;
         this->_id = id;
         this->_botid = botid;
         refreshInfo(env);
@@ -424,10 +452,10 @@ namespace MiraiCP {
         if (re == "E1") {
             throw GroupException(MIRAICP_EXCEPTION_WHERE);
         }
-        return Tools::StringToVector(re);
+        return Tools::StringToVector(std::move(re));
     }
     Group::Group(QQID groupid, QQID botid, JNIEnv *env) : Contact() {
-        this->_type = 2;
+        this->_type = MIRAI_GROUP;
         this->_id = groupid;
         this->_botid = botid;
         refreshInfo(env);
@@ -614,7 +642,7 @@ namespace MiraiCP {
     /*成员类实现*/
     Member::Member(QQID id, QQID groupid, QQID botid, JNIEnv *env)
         : Contact() {
-        this->_type = 3;
+        this->_type = MIRAI_MEMBER;
         this->_id = id;
         this->_groupid = groupid;
         this->_botid = botid;
@@ -691,12 +719,12 @@ namespace MiraiCP {
     std::string MessageChain::toMiraiCode() const {
         return Tools::VectorToString(this->toMiraiCodeVector(), "");
     }
-    MessageSource MessageChain::quoteAndSend0(const std::string &msg, QQID groupid,
+    MessageSource MessageChain::quoteAndSend0(std::string msg, QQID groupid,
                                               JNIEnv *env) {
         json obj;
         json sign;
         obj["messageSource"] = this->source->serializeToString();
-        obj["msg"] = msg;
+        obj["msg"] = std::move(msg);
         sign["MiraiCode"] = true;
         sign["groupid"] = groupid;
         obj["sign"] = sign.dump();
@@ -718,7 +746,7 @@ namespace MiraiCP {
                 size_t back = MessageChain::findEnd(m, pos);
                 if (back == -1) throw IllegalStateException("", MIRAICP_EXCEPTION_WHERE);
                 std::string tmp = m.substr(pos, back - pos);
-                tmp = Tools::replace(tmp, "[mirai:", "");
+                tmp = Tools::replace(std::move(tmp), "[mirai:", "");
                 size_t i = tmp.find(':'); // first :
                 int t = SingleMessage::getKey(tmp.substr(0, i));
                 switch (t) {
@@ -1186,18 +1214,17 @@ namespace MiraiCP {
     long ThreadManager::JNIVersion = 0;
     // 结束静态成员
     void ThreadManager::setEnv(JNIEnv *e) {
-        mtx.lock();
+        std::lock_guard lk(mtx);
         if (!ThreadManager::included(ThreadManager::getThreadId())) {
             ThreadInfo tmp{e, false};
             ThreadManager::threads.insert(std::pair<std::string, ThreadInfo>(ThreadManager::getThreadId(), tmp));
         } else {
             ThreadManager::threads[ThreadManager::getThreadId()].e = e;
         }
-        mtx.unlock();
     }
     void ThreadManager::newEnv(const char *threadName) {
         JNIEnv *env = nullptr;
-        JavaVMAttachArgs args{JNIVersion,
+        JavaVMAttachArgs args{static_cast<int>(JNIVersion),
                               const_cast<char *>(threadName),
                               nullptr};
         gvm->AttachCurrentThread((void **) &env, &args);
@@ -1206,14 +1233,13 @@ namespace MiraiCP {
         Logger::logger.info("refresh env");
     };
     void ThreadManager::detach() {
-        mtx.lock();
+        std::lock_guard lk(mtx);
         if (ThreadManager::included(ThreadManager::getThreadId())) {
             bool att = ThreadManager::threads[ThreadManager::getThreadId()].attach;
             ThreadManager::threads.erase(ThreadManager::getThreadId());
             if (att)
                 gvm->DetachCurrentThread();
         }
-        mtx.unlock();
     }
     bool ThreadManager::included(const std::string &id) {
         if (ThreadManager::threads.empty() || ThreadManager::threads.count(id) == 0)
@@ -1221,12 +1247,14 @@ namespace MiraiCP {
         return true;
     }
     JNIEnv *ThreadManager::getEnv() {
-        mtx.lock();
-        if (!ThreadManager::included(getThreadId())) {
-            ThreadManager::newEnv();
+        JNIEnv *tmp;
+        {
+            std::lock_guard lk(mtx);
+            if (!ThreadManager::included(getThreadId())) {
+                ThreadManager::newEnv();
+            }
+            tmp = ThreadManager::threads[ThreadManager::getThreadId()].e;
         }
-        JNIEnv *tmp = ThreadManager::threads[ThreadManager::getThreadId()].e;
-        mtx.unlock();
         return tmp;
     }
 } // namespace MiraiCP
@@ -1272,16 +1300,17 @@ namespace MiraiCP::Tools {
         }
         return str;
     }
-    std::vector<unsigned long long> StringToVector(std::string temp) {
-        std::vector<unsigned long long> result;
+    std::vector<QQID> StringToVector(std::string temp) {
+        std::vector<QQID> result;
         temp.erase(temp.begin());
         temp.pop_back();
         std::regex ws_re("[,]+");
         std::vector<std::string> v(std::sregex_token_iterator(temp.begin(), temp.end(), ws_re, -1),
                                    std::sregex_token_iterator());
         result.reserve(v.size());
-        for (auto &&s: v)
-            result.push_back(std::stoull(s));
+        std::for_each(v.begin(), v.end(), [&](auto &&s) { result.emplace_back(std::stoull(s)); });
+        // for (auto &&s: v)
+        //     result.emplace_back(std::stoull(s));
         return result;
     }
     std::string escapeFromMiraiCode(const std::string &s) {
@@ -1325,14 +1354,13 @@ namespace MiraiCP::Tools {
 } // namespace MiraiCP::Tools
 //from utils.cpp
 // 开始对接JNI接口代码
-/*
-* 名称:Java_com_example_plugin_CPP_1lib_Verify
-* 作用:判断是否连接上本插件，勿改
-* 参数:env 必备，job 必备
-* 返回值:jstring (用str2jstring把string类型转成jsrting) 发送返回的字符串
-*/
 using json = nlohmann::json;
 namespace MiraiCP::JNIApi {
+    /*
+    * 作用:判断是否连接上本插件，勿改
+    * 参数:env 必备，job 必备
+    * 返回值:jstring (用str2jstring把string类型转成jsrting) 发送返回的字符串
+    */
     // env != null, call from jni
     JNIEXPORT jstring Verify(JNIEnv *env, jobject, jstring id) {
         using namespace MiraiCP;
@@ -1358,10 +1386,11 @@ namespace MiraiCP::JNIApi {
         //验证机制，返回当前SDK版本
     }
     /*
- * 插件结束事件
- * env != null, call from jni
- */
+     * 插件结束事件
+     * env != null, call from jni
+     */
     JNIEXPORT jobject PluginDisable(JNIEnv *env, jobject job) {
+        if (CPPPlugin::plugin == nullptr) return job;
         using namespace MiraiCP;
         ThreadManager::setEnv(env);
         try {
@@ -1377,9 +1406,9 @@ namespace MiraiCP::JNIApi {
         return MiraiCP::Tools::str2jstring("MIRAICP_NULL");
     }
     /*
-* 消息解析分流
- * env != null, call from jni
-*/
+    * 消息解析分流
+     * env != null, call from jni
+    */
     JNIEXPORT jstring Event(JNIEnv *env, jobject, jstring content) {
         using namespace MiraiCP;
         ThreadManager::setEnv(env);
@@ -1394,12 +1423,12 @@ namespace MiraiCP::JNIApi {
             return returnNull();
         }
         int type = j["type"].get<int>();
-        if (eventTypes(type) != eventTypes::Command && Event::processor.noRegistered(type)) return returnNull();
+        if (eventTypes(type) != eventTypes::Command && Event::noRegistered(type)) return returnNull();
         try {
             switch (eventTypes(type)) {
                 case eventTypes::GroupMessageEvent: {
                     //GroupMessage
-                    Event::processor.broadcast<GroupMessageEvent>(
+                    Event::broadcast<GroupMessageEvent>(
                             GroupMessageEvent(j["group"]["botid"],
                                               Group(Group::deserialize(j["group"])),
                                               Member(Member::deserialize(j["member"])),
@@ -1409,7 +1438,7 @@ namespace MiraiCP::JNIApi {
                 }
                 case eventTypes::PrivateMessageEvent: {
                     //私聊消息
-                    Event::processor.broadcast<PrivateMessageEvent>(
+                    Event::broadcast<PrivateMessageEvent>(
                             PrivateMessageEvent(j["friend"]["botid"],
                                                 Friend(Friend::deserialize(j["friend"])),
                                                 MessageChain::deserializationFromMessageSourceJson(json::parse(j["source"].get<std::string>()))
@@ -1418,7 +1447,7 @@ namespace MiraiCP::JNIApi {
                 }
                 case eventTypes::GroupInviteEvent:
                     //群聊邀请
-                    Event::processor.broadcast<GroupInviteEvent>(
+                    Event::broadcast<GroupInviteEvent>(
                             GroupInviteEvent(
                                     j["source"]["botid"],
                                     j["request"],
@@ -1429,7 +1458,7 @@ namespace MiraiCP::JNIApi {
                     break;
                 case eventTypes::NewFriendRequestEvent:
                     //好友
-                    Event::processor.broadcast<NewFriendRequestEvent>(
+                    Event::broadcast<NewFriendRequestEvent>(
                             NewFriendRequestEvent(
                                     j["source"]["botid"],
                                     j["request"],
@@ -1440,7 +1469,7 @@ namespace MiraiCP::JNIApi {
                     break;
                 case eventTypes::MemberJoinEvent:
                     //新成员加入
-                    Event::processor.broadcast<MemberJoinEvent>(
+                    Event::broadcast<MemberJoinEvent>(
                             MemberJoinEvent(
                                     j["group"]["botid"],
                                     j["jointype"],
@@ -1450,7 +1479,7 @@ namespace MiraiCP::JNIApi {
                     break;
                 case eventTypes::MemberLeaveEvent:
                     //群成员退出
-                    Event::processor.broadcast<MemberLeaveEvent>(MemberLeaveEvent(
+                    Event::broadcast<MemberLeaveEvent>(MemberLeaveEvent(
                             j["group"]["botid"],
                             j["leavetype"],
                             j["memberid"],
@@ -1458,7 +1487,7 @@ namespace MiraiCP::JNIApi {
                             j["operatorid"]));
                     break;
                 case eventTypes::RecallEvent:
-                    Event::processor.broadcast<RecallEvent>(RecallEvent(
+                    Event::broadcast<RecallEvent>(RecallEvent(
                             j["botid"],
                             j["etype"],
                             j["time"],
@@ -1469,14 +1498,14 @@ namespace MiraiCP::JNIApi {
                             j["groupid"]));
                     break;
                 case eventTypes::BotJoinGroupEvent:
-                    Event::processor.broadcast<BotJoinGroupEvent>(BotJoinGroupEvent(
+                    Event::broadcast<BotJoinGroupEvent>(BotJoinGroupEvent(
                             j["group"]["botid"],
                             j["etype"],
                             Group(Group::deserialize(j["group"])),
                             j["inviterid"]));
                     break;
                 case eventTypes::GroupTempMessageEvent:
-                    Event::processor.broadcast<GroupTempMessageEvent>(GroupTempMessageEvent(
+                    Event::broadcast<GroupTempMessageEvent>(GroupTempMessageEvent(
                             j["group"]["botid"],
                             Group(Group::deserialize(j["group"])),
                             Member(Member::deserialize(j["member"])),
@@ -1484,19 +1513,19 @@ namespace MiraiCP::JNIApi {
                                     .plus(MessageSource::deserializeFromString(j["source"]))));
                     break;
                 case eventTypes::TimeOutEvent:
-                    Event::processor.broadcast(TimeOutEvent(j["msg"]));
+                    Event::broadcast(TimeOutEvent(j["msg"]));
                     break;
                 case eventTypes::BotOnlineEvent:
-                    Event::processor.broadcast(BotOnlineEvent(j["botid"]));
+                    Event::broadcast(BotOnlineEvent(j["botid"]));
                     break;
                 case eventTypes::NudgeEvent:
-                    Event::processor.broadcast(NudgeEvent(Contact::deserialize(j["from"]),
-                                                          Contact::deserialize(j["target"]),
-                                                          Contact::deserialize(j["subject"]),
-                                                          j["botid"]));
+                    Event::broadcast(NudgeEvent(Contact::deserialize(j["from"]),
+                                                Contact::deserialize(j["target"]),
+                                                Contact::deserialize(j["subject"]),
+                                                j["botid"]));
                     break;
                 case eventTypes::BotLeaveEvent:
-                    Event::processor.broadcast(BotLeaveEvent(j["groupid"], j["botid"]));
+                    Event::broadcast(BotLeaveEvent(j["groupid"], j["botid"]));
                     break;
                 case eventTypes::MemberJoinRequestEvent: {
                     std::optional<Group> a;
@@ -1511,11 +1540,11 @@ namespace MiraiCP::JNIApi {
                         b = std::nullopt;
                     else
                         b = Member(temp);
-                    Event::processor.broadcast(MemberJoinRequestEvent(a, b, temp.botid(), j["requester"], j["requestData"]));
+                    Event::broadcast(MemberJoinRequestEvent(a, b, temp.botid(), j["requester"], j["requestData"]));
                     break;
                 }
                 case eventTypes::MessagePreSendEvent: {
-                    Event::processor.broadcast(MessagePreSendEvent(Contact::deserialize(j["target"]), MessageChain::deserializationFromMessageSourceJson(j["message"].get<std::string>(), false), j["botid"]));
+                    Event::broadcast(MessagePreSendEvent(Contact::deserialize(j["target"]), MessageChain::deserializationFromMessageSourceJson(j["message"].get<std::string>(), false), j["botid"]));
                     break;
                 }
                 case eventTypes::Command: {
@@ -1533,7 +1562,8 @@ namespace MiraiCP::JNIApi {
             Logger::logger.error(e.what());
             Logger::logger.error("info:", tmp);
             return Tools::str2jstring("ERROR");
-        } catch (const MiraiCPExceptionBase &e) {
+        } catch (MiraiCPExceptionBase &e) {
+            Event::broadcast<MiraiCPExceptionEvent>(MiraiCPExceptionEvent(&e));
             e.raise();
             return Tools::str2jstring("ERROR");
         } catch (const std::exception &e) {
