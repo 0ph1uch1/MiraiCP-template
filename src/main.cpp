@@ -3,11 +3,11 @@
 using namespace MiraiCP;
 
 const PluginConfig CPPPlugin::config{
-        "Plugin id",  // 插件id
-        "Plugin name", // 插件名称
-        "Version", // 插件版本
-        "Author name",    // 插件作者
-        "Plugin description"        // 可选：插件描述
+        "Plugin id",          // 插件id
+        "Plugin name",        // 插件名称
+        "Version",            // 插件版本
+        "Author name",        // 插件作者
+        "Plugin description"  // 可选：插件描述
         "Publish time"        // 可选：日期
 };
 
@@ -20,16 +20,16 @@ public:
 
   // 入口函数
   void onEnable() override {
-    // 监听
+    // 请在此处监听
   }
 
   // 退出函数
   void onDisable() override {
-    /*插件结束*/
+    /*插件结束前执行*/
   }
 };
 
 // 绑定当前插件实例
 void MiraiCP::enrollPlugin() {
-  MiraiCP::enrollPlugin0(new Main());
+  MiraiCP::enrollPlugin(new Main);
 }

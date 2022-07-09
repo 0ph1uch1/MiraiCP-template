@@ -1423,6 +1423,7 @@ void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
     LibLoader::LoaderApi::set_loader_apis(&funcs);
     assert(LibLoader::LoaderApi::get_loader_apis() != nullptr);
     try {
+        Logger::logger.info("开始启动插件：" + MiraiCP::CPPPlugin::config.id);
         enrollPlugin();
         // plugin == nullptr 无插件实例加载
         if (CPPPlugin::plugin != nullptr) {
@@ -1430,7 +1431,7 @@ void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
         }
     } catch (const MiraiCPExceptionBase &e) {
         e.raise();
-        Logger::logger.info("插件" + MiraiCP::CPPPlugin::config.id + "加载失败");
+        Logger::logger.info("插件" + MiraiCP::CPPPlugin::config.id + "启动失败");
         FUNC_EXIT();
     } catch (...) {
     }
@@ -1439,10 +1440,12 @@ void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
 void FUNC_EXIT() {
     static_assert(std::is_same_v<decltype(&FUNC_EXIT), LibLoader::plugin_func_ptr>);
     using namespace MiraiCP;
-    if (CPPPlugin::plugin == nullptr) return;
-    CPPPlugin::plugin->onDisable();
-    LibLoader::LoaderApi::reset_loader_apis();
+    Logger::logger.info("开始禁用插件：" + MiraiCP::CPPPlugin::config.id);
+    Event::clear();
+    if (CPPPlugin::plugin != nullptr) CPPPlugin::plugin->onDisable();
     CPPPlugin::plugin.reset();
+    // 无法保证用户插件析构函数是否调用api，在plugin.reset()之前不可reset loader api
+    LibLoader::LoaderApi::reset_loader_apis();
 }
 /// 消息解析分流
 /// env != null, call from jni
@@ -1470,10 +1473,12 @@ void FUNC_EVENT(std::string content) {
         Event::broadcast<MiraiCPExceptionEvent>(MiraiCPExceptionEvent(&e));
         e.raise();
     } catch (const std::exception &e) {
-        // 这里如果不catch全部exception就会带崩jvm
         Logger::logger.error(e.what());
         Logger::logger.error("info:", content);
     }
+    // 如果产生了无法处理的异常，直接退出插件
+    // loader端将处理这个异常并将绑定的线程结束掉
+    // 如果存在其他线程，可能导致段错误
 }
 /// 获取 Plugin Info
 /// 如果未正确定义，插件无法正确加载
