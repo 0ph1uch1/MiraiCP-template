@@ -19,7 +19,7 @@
 #define MIRAICP_PRO_PLUGINCONFIG_H
 #include <json.hpp>
 namespace MiraiCP {
-    const std::string MiraiCPVersion = "v2.11.0";
+    const std::string MiraiCPVersion = "v2.12.0-RC";
     struct PluginConfig {
         /// @brief 插件id, 要与别人不一样否则报错无法加载(建议用类包格式，如: io.github.nambers)
         std::string id;
@@ -1004,7 +1004,7 @@ namespace MiraiCP {
             j["primaryName"] = command.config().primaryName;
             j["secondName"] = command.config().secondNames;
             j["description"] = command.config().description;
-            j["override"] = command.config().override;
+            j["override"] = command.config().overrideOrigin;
             j["preFixOption"] = command.config().preFixOption;
             size_t before = commandList.size();
             std::shared_ptr<IRawCommand> c;
@@ -4211,12 +4211,15 @@ namespace MiraiCP {
                           try {
                               lambda_func(std::forward<decltype(argss)>(argss)...);
                           } catch (MiraiCPExceptionBase &e) {
+                              e.raise();
                               Event::broadcast(MiraiCPExceptionEvent(&e));
                           } catch (const std::exception &e) {
                               MiraiCPThreadException exNew(std::string(e.what()), std::this_thread::get_id(), MIRAICP_EXCEPTION_WHERE);
+                              exNew.raise();
                               Event::broadcast(MiraiCPExceptionEvent(&exNew));
                           } catch (...) {
                               MiraiCPThreadException exNew("unknown exception type", std::this_thread::get_id(), MIRAICP_EXCEPTION_WHERE);
+                              exNew.raise();
                               Event::broadcast(MiraiCPExceptionEvent(&exNew));
                           }
                       },
@@ -4227,7 +4230,7 @@ namespace MiraiCP {
             *static_cast<std::thread *>(this) = std::move(other);
             return *this;
         }
-        MiraiCPNewThread &operator=(MiraiCPNewThread &&other) {
+        MiraiCPNewThread &operator=(MiraiCPNewThread &&other) noexcept {
             *static_cast<std::thread *>(this) = std::move(*static_cast<std::thread *>(&other));
             return *this;
         }

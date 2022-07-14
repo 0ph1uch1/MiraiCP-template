@@ -28,5 +28,5 @@
 
     在`build`文件夹中使用`make`编译代码。
 
-- 生成的文件在build目录下，后缀为`dll`或`so`。和MiraiCP loader/plugin 配合用（在loader/plugin的config.json里写路径, 见[MiraiCP文档](https://github.com/Nambers/MiraiCP/blob/main/README.md#32-%E5%90%AF%E5%8A%A8sdk)）
+- 生成的文件在build目录下，后缀为`.dll`或`.so`。和MiraiCP loader/plugin 配合用（在loader/plugin的config.json里写路径, 见[MiraiCP文档](https://github.com/Nambers/MiraiCP/blob/main/README.md#32-%E5%90%AF%E5%8A%A8sdk)）
 

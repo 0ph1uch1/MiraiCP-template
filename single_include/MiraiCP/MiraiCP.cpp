@@ -678,7 +678,7 @@ namespace MiraiCP::KtOperation {
 namespace MiraiCP {
     Logger Logger::logger;
     void Logger::log_interface(const std::string &content, int level) {
-        LibLoader::LoaderApi::loggerInterface(content, MiraiCP::CPPPlugin::config.name, -1, level);
+        LibLoader::LoaderApi::loggerInterface(content, "plugin/" + MiraiCP::CPPPlugin::config.name, -1, level);
     }
     void IdLogger::log_interface(const std::string &content, int level) {
         LibLoader::LoaderApi::loggerInterface(content, "", static_cast<long long>(id), level);
@@ -1422,8 +1422,8 @@ void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
     Event::clear();
     LibLoader::LoaderApi::set_loader_apis(&funcs);
     assert(LibLoader::LoaderApi::get_loader_apis() != nullptr);
+    Logger::logger.info("开始启动插件: " + MiraiCP::CPPPlugin::config.id);
     try {
-        Logger::logger.info("开始启动插件：" + MiraiCP::CPPPlugin::config.id);
         enrollPlugin();
         // plugin == nullptr 无插件实例加载
         if (CPPPlugin::plugin != nullptr) {
@@ -1431,9 +1431,15 @@ void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
         }
     } catch (const MiraiCPExceptionBase &e) {
         e.raise();
-        Logger::logger.info("插件" + MiraiCP::CPPPlugin::config.id + "启动失败");
-        FUNC_EXIT();
+        Logger::logger.error("插件(id=" + CPPPlugin::config.id + ", name=" + CPPPlugin::config.name + ")启动失败");
+        throw IllegalStateException(e.what(), e.filename, e.lineNum);
+    } catch (const std::exception &e) {
+        Logger::logger.error(e.what());
+        Logger::logger.error("插件(id=" + CPPPlugin::config.id + ", name=" + CPPPlugin::config.name + ")启动失败");
+        throw IllegalStateException(e.what(), MIRAICP_EXCEPTION_WHERE);
     } catch (...) {
+        Logger::logger.error("插件(id=" + CPPPlugin::config.id + ", name=" + CPPPlugin::config.name + ")启动失败");
+        throw IllegalStateException("", MIRAICP_EXCEPTION_WHERE);
     }
 }
 /// 插件结束(也可能是暂时的disable)
