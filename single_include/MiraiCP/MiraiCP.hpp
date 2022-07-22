@@ -22,18 +22,39 @@ namespace MiraiCP {
     const std::string MiraiCPVersion = "v2.12.0-RC";
     struct PluginConfig {
         /// @brief 插件id, 要与别人不一样否则报错无法加载(建议用类包格式，如: io.github.nambers)
-        std::string id;
+        const char *id;
         /// @brief 插件名称
-        std::string name;
+        const char *name;
         /// @brief 插件版本
-        std::string version;
+        const char *version;
         /// @brief 插件作者(及联系方式)
-        std::string author;
+        const char *author;
         /// @brief [optional]插件描述
-        std::string description;
+        const char *description;
         /// @brief [optional]构建时间, 默认为__DATE__宏
-        std::string time = __DATE__;
-        const std::string _MVersion = MiraiCPVersion;
+        const char *time = __DATE__;
+        const char *mversion = MiraiCPVersion.c_str();
+        std::string getId() const {
+            return {id};
+        }
+        std::string getName() const {
+            return {name};
+        }
+        std::string getVersion() const {
+            return {version};
+        }
+        std::string getAuthor() const {
+            return {author};
+        }
+        std::string getDescription() const {
+            return {description};
+        }
+        std::string getTime() const {
+            return {time};
+        }
+        std::string getMVersion() const {
+            return {mversion};
+        }
         nlohmann::json serialize();
         std::string serialize2string();
     };
@@ -98,7 +119,7 @@ namespace CommonTools {
 #define MIRAICP_PRO_COMMONTYPES_H
 // don't create cpp for this header
 // #include "PluginConfig.h"
-// #include "loaderApi.h"
+// #include "loaderApiInternal.h"
 // Copyright (c) 2022. Eritque arcus and contributors.
 //
 // This program is free software: you can redistribute it and/or modify
@@ -114,16 +135,73 @@ namespace CommonTools {
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-#ifndef MIRAICP_PRO_LOADERAPI_H
-#define MIRAICP_PRO_LOADERAPI_H
+#ifndef MIRAICP_PRO_LOADERAPIINTERNAL_H
+#define MIRAICP_PRO_LOADERAPIINTERNAL_H
+// #include "miraicpString.h"
+// Copyright (c) 2022. Eritque arcus and contributors.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or any later version(in your opinion).
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+#ifndef MIRAICP_PRO_MIRAICPSTRING_H
+#define MIRAICP_PRO_MIRAICPSTRING_H
+#include <cassert>
 #include <string>
-#include <vector>
-#if defined(MIRAICP_LIB_LOADER) | defined(MIRAICP_CORE)
-#include <jni.h>
-#else
-// forward declaration
-struct JNIEnv;
-#endif
+namespace MiraiCP {
+    // this class is used to ensure data consistency between dynamic libs
+    // note: do not use this directly;
+    // always convert to const char* or std::string before using.
+    class MiraiCPString {
+        using string = std::string;
+        friend void swap(MiraiCPString &, MiraiCPString &) noexcept;
+    private:
+        static constexpr decltype(&::std::free) std_free_ptr = &::std::free;
+    private:
+        // to keep integration and safe for empty construction/deconstruction, always initialize here
+        char *str = nullptr;
+        size_t _size = 0;
+        decltype(&::std::free) free_this = std_free_ptr; // specify which free() to use; ensure deconstruction is paired to construction
+    public:
+        bool isEmpty() const {
+            return _size == 0;
+        }
+        MiraiCPString() : str(nullptr), _size(0), free_this(std_free_ptr) {}
+        // call if _size is set to non-zero
+        // allocate memory for str
+        void construction();
+        ~MiraiCPString();
+        MiraiCPString(const MiraiCPString &other);
+        MiraiCPString(MiraiCPString &&temp) noexcept;
+        MiraiCPString(const char *char_str);
+        MiraiCPString(const std::string &string_str);
+        std::string toString() const {
+            if (str == nullptr || _size == 0) return {};
+            return {str};
+        }
+        operator std::string() const {
+            return toString();
+        }
+        // for safe destruction, DO NOT provide move convert to char*
+        // the return value of this method can always be deleted by delete[] and is never nullptr
+        const char *copyToCharPtr() const;
+        bool operator==(const MiraiCPString &another) const;
+        MiraiCPString &operator=(const MiraiCPString &another);
+        MiraiCPString &operator=(MiraiCPString &&another) noexcept;
+    };
+    static_assert(sizeof(char) == 1, "Please make sure the size of char type is 1");
+    static_assert(sizeof(MiraiCPString) == 3 * 8, "Please make sure MiraiCP is compiled under 64-bit mode.");
+} // namespace MiraiCP
+#endif //MIRAICP_PRO_MIRAICPSTRING_H
 #ifdef MIRAICP_LIB_LOADER
 constexpr int LOADERAPI_H_COUNTER_BASE = __COUNTER__ + 1;
 #define LOADERAPI_H_NOTHING(X)
@@ -135,26 +213,27 @@ constexpr int LOADERAPI_H_COUNTER_BASE = __COUNTER__ + 1;
 #endif
 // the API defs to be exposed
 namespace LibLoader::LoaderApi {
+    using MiraiCP::MiraiCPString;
     LOADER_API_COUNT
-    std::string pluginOperation(const std::string &);
+    MiraiCPString pluginOperation(const MiraiCPString&);
     LOADER_API_COUNT
-    void loggerInterface(const std::string &content, std::string name, long long id, int level);
+    void loggerInterface(const MiraiCPString& content, const MiraiCPString& name, long long id, int level);
     LOADER_API_COUNT
-    std::vector<std::string> showAllPluginId();
+    MiraiCPString showAllPluginId();
     LOADER_API_COUNT
-    void enablePluginById(const std::string &);
+    void enablePluginById(const MiraiCPString&);
     LOADER_API_COUNT
-    void disablePluginById(const std::string &);
+    void disablePluginById(const MiraiCPString&);
     LOADER_API_COUNT
     void enableAllPlugins();
     LOADER_API_COUNT
     void disableAllPlugins();
     LOADER_API_COUNT
-    void loadNewPlugin(const std::string &, bool);
+    void loadNewPlugin(const MiraiCPString&, bool);
     LOADER_API_COUNT
-    void unloadPluginById(const std::string &);
+    void unloadPluginById(const MiraiCPString&);
     LOADER_API_COUNT
-    void reloadPluginById(const std::string &);
+    void reloadPluginById(const MiraiCPString&);
     struct interface_funcs {
         decltype(&pluginOperation) _pluginOperation;
         decltype(&loggerInterface) _loggerInterface;
@@ -200,7 +279,7 @@ namespace LibLoader::LoaderApi {
     }
 #endif
 } // namespace LibLoader::LoaderApi
-#endif //MIRAICP_PRO_LOADERAPI_H
+#endif //MIRAICP_PRO_LOADERAPIINTERNAL_H
 #define FUNC_ENTRANCE FUNC_ENTRANCE
 #define FUNC_EVENT FUNC_EVENT
 #define FUNC_EXIT FUNC_EXIT
@@ -210,7 +289,7 @@ namespace LibLoader {
     /// @see @macro FUNC_ENTRANCE
     typedef void (*plugin_entrance_func_ptr)(const LoaderApi::interface_funcs &);
     /// @see @macro FUNC_EVENT
-    typedef void (*plugin_event_func_ptr)(const std::string);
+    typedef void (*plugin_event_func_ptr)(const char *);
     /// @see @macro FUNC_EXIT
     typedef void (*plugin_func_ptr)();
     /// @see @macro PLUGIN_INFO
@@ -232,16 +311,9 @@ namespace LibLoader {
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-#ifndef MIRAICP_PRO_LOADERAPI_H
-#define MIRAICP_PRO_LOADERAPI_H
-#include <string>
-#include <vector>
-#if defined(MIRAICP_LIB_LOADER) | defined(MIRAICP_CORE)
-#include <jni.h>
-#else
-// forward declaration
-struct JNIEnv;
-#endif
+#ifndef MIRAICP_PRO_LOADERAPIINTERNAL_H
+#define MIRAICP_PRO_LOADERAPIINTERNAL_H
+// #include "miraicpString.h"
 #ifdef MIRAICP_LIB_LOADER
 constexpr int LOADERAPI_H_COUNTER_BASE = __COUNTER__ + 1;
 #define LOADERAPI_H_NOTHING(X)
@@ -253,26 +325,27 @@ constexpr int LOADERAPI_H_COUNTER_BASE = __COUNTER__ + 1;
 #endif
 // the API defs to be exposed
 namespace LibLoader::LoaderApi {
+    using MiraiCP::MiraiCPString;
     LOADER_API_COUNT
-    std::string pluginOperation(const std::string &);
+    MiraiCPString pluginOperation(const MiraiCPString&);
     LOADER_API_COUNT
-    void loggerInterface(const std::string &content, std::string name, long long id, int level);
+    void loggerInterface(const MiraiCPString& content, const MiraiCPString& name, long long id, int level);
     LOADER_API_COUNT
-    std::vector<std::string> showAllPluginId();
+    MiraiCPString showAllPluginId();
     LOADER_API_COUNT
-    void enablePluginById(const std::string &);
+    void enablePluginById(const MiraiCPString&);
     LOADER_API_COUNT
-    void disablePluginById(const std::string &);
+    void disablePluginById(const MiraiCPString&);
     LOADER_API_COUNT
     void enableAllPlugins();
     LOADER_API_COUNT
     void disableAllPlugins();
     LOADER_API_COUNT
-    void loadNewPlugin(const std::string &, bool);
+    void loadNewPlugin(const MiraiCPString&, bool);
     LOADER_API_COUNT
-    void unloadPluginById(const std::string &);
+    void unloadPluginById(const MiraiCPString&);
     LOADER_API_COUNT
-    void reloadPluginById(const std::string &);
+    void reloadPluginById(const MiraiCPString&);
     struct interface_funcs {
         decltype(&pluginOperation) _pluginOperation;
         decltype(&loggerInterface) _loggerInterface;
@@ -318,7 +391,71 @@ namespace LibLoader::LoaderApi {
     }
 #endif
 } // namespace LibLoader::LoaderApi
-#endif //MIRAICP_PRO_LOADERAPI_H
+#endif //MIRAICP_PRO_LOADERAPIINTERNAL_H
+// Copyright (c) 2022. Eritque arcus and contributors.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or any later version(in your opinion).
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+#ifndef MIRAICP_PRO_MIRAICPSTRING_H
+#define MIRAICP_PRO_MIRAICPSTRING_H
+#include <cassert>
+#include <string>
+namespace MiraiCP {
+    // this class is used to ensure data consistency between dynamic libs
+    // note: do not use this directly;
+    // always convert to const char* or std::string before using.
+    class MiraiCPString {
+        using string = std::string;
+        friend void swap(MiraiCPString &, MiraiCPString &) noexcept;
+    private:
+        static constexpr decltype(&::std::free) std_free_ptr = &::std::free;
+    private:
+        // to keep integration and safe for empty construction/deconstruction, always initialize here
+        char *str = nullptr;
+        size_t _size = 0;
+        decltype(&::std::free) free_this = std_free_ptr; // specify which free() to use; ensure deconstruction is paired to construction
+    public:
+        bool isEmpty() const {
+            return _size == 0;
+        }
+        MiraiCPString() : str(nullptr), _size(0), free_this(std_free_ptr) {}
+        // call if _size is set to non-zero
+        // allocate memory for str
+        void construction();
+        ~MiraiCPString();
+        MiraiCPString(const MiraiCPString &other);
+        MiraiCPString(MiraiCPString &&temp) noexcept;
+        MiraiCPString(const char *char_str);
+        MiraiCPString(const std::string &string_str);
+        std::string toString() const {
+            if (str == nullptr || _size == 0) return {};
+            return {str};
+        }
+        operator std::string() const {
+            return toString();
+        }
+        // for safe destruction, DO NOT provide move convert to char*
+        // the return value of this method can always be deleted by delete[] and is never nullptr
+        const char *copyToCharPtr() const;
+        bool operator==(const MiraiCPString &another) const;
+        MiraiCPString &operator=(const MiraiCPString &another);
+        MiraiCPString &operator=(MiraiCPString &&another) noexcept;
+    };
+    static_assert(sizeof(char) == 1, "Please make sure the size of char type is 1");
+    static_assert(sizeof(MiraiCPString) == 3 * 8, "Please make sure MiraiCP is compiled under 64-bit mode.");
+} // namespace MiraiCP
+#endif //MIRAICP_PRO_MIRAICPSTRING_H
 #ifndef MIRAICP_PRO_BOT_H
 #define MIRAICP_PRO_BOT_H
 #include <string>
@@ -810,7 +947,7 @@ namespace MiraiCP {
     /// @see MiraiCPExceptionBase
     class PluginNotAuthorizedException : public MiraiCPExceptionCRTP<PluginNotAuthorizedException> {
     public:
-        explicit PluginNotAuthorizedException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.id + "没有管理权限", std::move(_filename), _lineNum) {}
+        explicit PluginNotAuthorizedException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.getId() + "没有管理权限", std::move(_filename), _lineNum) {}
         static string exceptionType() { return "PluginNotAuthorizedException"; }
     };
     /// 插件未加载抛出该异常
@@ -819,7 +956,7 @@ namespace MiraiCP {
     /// @see MiraiCPExceptionBase
     class PluginNotEnabledException : public MiraiCPExceptionCRTP<PluginNotEnabledException> {
     public:
-        explicit PluginNotEnabledException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.id + "未加载", std::move(_filename), _lineNum) {}
+        explicit PluginNotEnabledException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.getId() + "未加载", std::move(_filename), _lineNum) {}
         static string exceptionType() { return "PluginNotEnabledException"; }
     };
     /// 如果在 MiraiCPNewThread 中捕获到了非 MiraiCP 之外的异常抛出
@@ -2904,8 +3041,8 @@ namespace MiraiCP {
             return processor._all_events_[index].empty();
         }
         /// 清空全部配置
-        static void clear(){
-            processor._all_events_.clear();
+        static void clear() {
+            for (auto &a: processor._all_events_) a.clear();
         }
         static void incomingEvent(nlohmann::json j, int type);
         /// 广播一个事件, 必须为MiraiCPEvent的派生类
@@ -3163,7 +3300,7 @@ namespace MiraiCP {
     /// @see MiraiCPExceptionBase
     class PluginNotAuthorizedException : public MiraiCPExceptionCRTP<PluginNotAuthorizedException> {
     public:
-        explicit PluginNotAuthorizedException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.id + "没有管理权限", std::move(_filename), _lineNum) {}
+        explicit PluginNotAuthorizedException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.getId() + "没有管理权限", std::move(_filename), _lineNum) {}
         static string exceptionType() { return "PluginNotAuthorizedException"; }
     };
     /// 插件未加载抛出该异常
@@ -3172,7 +3309,7 @@ namespace MiraiCP {
     /// @see MiraiCPExceptionBase
     class PluginNotEnabledException : public MiraiCPExceptionCRTP<PluginNotEnabledException> {
     public:
-        explicit PluginNotEnabledException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.id + "未加载", std::move(_filename), _lineNum) {}
+        explicit PluginNotEnabledException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.getId() + "未加载", std::move(_filename), _lineNum) {}
         static string exceptionType() { return "PluginNotEnabledException"; }
     };
     /// 如果在 MiraiCPNewThread 中捕获到了非 MiraiCP 之外的异常抛出
@@ -4819,6 +4956,27 @@ namespace MiraiCP {
 } // namespace MiraiCP
 // #undef get_return_type
 #endif //MIRAICP_PRO_TOOLS_H
+// Copyright (c) 2022 - 2022. Antares, Eritque arcus and contributors.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or any later version(in your opinion).
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+#ifndef MIRAICP_PRO_LOADERAPI_H
+#define MIRAICP_PRO_LOADERAPI_H
+// #include "loaderApiInternal.h"
+namespace LibLoader::LoaderApi {
+} // namespace LibLoader::LoaderApi
+#endif //MIRAICP_PRO_LOADERAPI_H
 #ifndef MIRAICP_PRO_UTILS_H
 #define MIRAICP_PRO_UTILS_H
 // #include "CPPPlugin.h"
@@ -4848,10 +5006,17 @@ namespace MiraiCP {
         enrollPlugin(p);
     }
 } // namespace MiraiCP
+#ifndef MIRAICP_EXPORT
+#if _WIN32 || _WIN64 || WIN32
+#define MIRAICP_EXPORT __declspec(dllexport)
+#else
+#define MIRAICP_EXPORT
+#endif
+#endif
 extern "C" {
-void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &);
-void FUNC_EVENT(std::string content);
-void FUNC_EXIT();
-const MiraiCP::PluginConfig &PLUGIN_INFO();
+MIRAICP_EXPORT void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &);
+MIRAICP_EXPORT void FUNC_EVENT(const char *content);
+MIRAICP_EXPORT void FUNC_EXIT();
+MIRAICP_EXPORT const MiraiCP::PluginConfig &PLUGIN_INFO();
 }
 #endif //MIRAICP_PRO_UTILS_H

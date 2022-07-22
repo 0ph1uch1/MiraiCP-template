@@ -669,7 +669,8 @@ namespace MiraiCP::KtOperation {
         nlohmann::json j;
         j["type"] = type;
         j["data"] = std::move(data);
-        std::string re = LibLoader::LoaderApi::pluginOperation(j.dump());
+        auto tmp = j.dump();
+        std::string re = LibLoader::LoaderApi::pluginOperation(tmp.c_str());
         if (catchErr) ErrorHandle(re, errorInfo);
         return re;
     }
@@ -678,10 +679,10 @@ namespace MiraiCP::KtOperation {
 namespace MiraiCP {
     Logger Logger::logger;
     void Logger::log_interface(const std::string &content, int level) {
-        LibLoader::LoaderApi::loggerInterface(content, "plugin/" + MiraiCP::CPPPlugin::config.name, -1, level);
+        LibLoader::LoaderApi::loggerInterface(content.c_str(), ("plugin/" + MiraiCP::CPPPlugin::config.getName()).c_str(), -1, level);
     }
     void IdLogger::log_interface(const std::string &content, int level) {
-        LibLoader::LoaderApi::loggerInterface(content, "", static_cast<long long>(id), level);
+        LibLoader::LoaderApi::loggerInterface(content.c_str(), "", static_cast<long long>(id), level);
     }
 } // namespace MiraiCP
 //from include/LowLevelAPI.cpp
@@ -1132,7 +1133,7 @@ namespace MiraiCP {
         return j;
     }
     std::string ServiceMessage::toMiraiCode() const {
-        return "[mirai:service:" + this->prefix + Tools::escapeToMiraiCode(content) + "]";
+        return "[mirai:service" + this->prefix + Tools::escapeToMiraiCode(content) + "]";
     }
     ServiceMessage::ServiceMessage(const SingleMessage &sg) : SingleMessage(sg) {
         if (sg.type != 4)
@@ -1365,23 +1366,24 @@ namespace LibLoader::LoaderApi {
         }
     }
     /// interfaces for plugins
-    std::string pluginOperation(const std::string &s) {
+    MiraiCPString pluginOperation(const MiraiCPString &s) {
         checkApi((void *) loader_apis->_pluginOperation);
         return loader_apis->_pluginOperation(s);
     }
-    void loggerInterface(const std::string &content, std::string name, long long id, int level) {
+    void loggerInterface(const MiraiCPString &content, const MiraiCPString &name, long long id, int level) {
         checkApi((void *) loader_apis->_loggerInterface);
-        loader_apis->_loggerInterface(content, std::move(name), id, level);
+        loader_apis->_loggerInterface(content, name, id, level);
     }
-    std::vector<std::string> showAllPluginId() {
+    // todo(ea): 返回可用类型而不是中间类型
+    MiraiCPString showAllPluginId() {
         checkApi((void *) loader_apis->_showAllPluginId);
         return loader_apis->_showAllPluginId();
     }
-    void enablePluginById(const std::string &id) {
+    void enablePluginById(const MiraiCPString &id) {
         checkApi((void *) loader_apis->_enablePluginById);
         loader_apis->_enablePluginById(id);
     }
-    void disablePluginById(const std::string &id) {
+    void disablePluginById(const MiraiCPString &id) {
         checkApi((void *) loader_apis->_disablePluginById);
         loader_apis->_disablePluginById(id);
     }
@@ -1393,15 +1395,15 @@ namespace LibLoader::LoaderApi {
         checkApi((void *) loader_apis->_disableAllPlugins);
         loader_apis->_disableAllPlugins();
     }
-    void loadNewPlugin(const std::string &path, bool activateNow) {
+    void loadNewPlugin(const MiraiCPString &path, bool activateNow) {
         checkApi((void *) loader_apis->_loadNewPlugin);
         loader_apis->_loadNewPlugin(path, activateNow);
     }
-    void unloadPluginById(const std::string &id) {
+    void unloadPluginById(const MiraiCPString &id) {
         checkApi((void *) loader_apis->_unloadPluginById);
         loader_apis->_unloadPluginById(id);
     }
-    void reloadPluginById(const std::string &id) {
+    void reloadPluginById(const MiraiCPString &id) {
         checkApi((void *) loader_apis->_reloadPluginById);
         loader_apis->_reloadPluginById(id);
     }
@@ -1416,13 +1418,13 @@ namespace LibLoader::LoaderApi {
 } // namespace LibLoader::LoaderApi
 extern "C" {
 /// 插件开启入口
-void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
+MIRAICP_EXPORT void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
     static_assert(std::is_same_v<decltype(&FUNC_ENTRANCE), LibLoader::plugin_entrance_func_ptr>);
     using namespace MiraiCP;
     Event::clear();
     LibLoader::LoaderApi::set_loader_apis(&funcs);
     assert(LibLoader::LoaderApi::get_loader_apis() != nullptr);
-    Logger::logger.info("开始启动插件: " + MiraiCP::CPPPlugin::config.id);
+    Logger::logger.info("开始启动插件: " + MiraiCP::CPPPlugin::config.getId());
     try {
         enrollPlugin();
         // plugin == nullptr 无插件实例加载
@@ -1431,22 +1433,22 @@ void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
         }
     } catch (const MiraiCPExceptionBase &e) {
         e.raise();
-        Logger::logger.error("插件(id=" + CPPPlugin::config.id + ", name=" + CPPPlugin::config.name + ")启动失败");
+        Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
         throw IllegalStateException(e.what(), e.filename, e.lineNum);
     } catch (const std::exception &e) {
         Logger::logger.error(e.what());
-        Logger::logger.error("插件(id=" + CPPPlugin::config.id + ", name=" + CPPPlugin::config.name + ")启动失败");
+        Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
         throw IllegalStateException(e.what(), MIRAICP_EXCEPTION_WHERE);
     } catch (...) {
-        Logger::logger.error("插件(id=" + CPPPlugin::config.id + ", name=" + CPPPlugin::config.name + ")启动失败");
+        Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
         throw IllegalStateException("", MIRAICP_EXCEPTION_WHERE);
     }
 }
 /// 插件结束(也可能是暂时的disable)
-void FUNC_EXIT() {
+MIRAICP_EXPORT void FUNC_EXIT() {
     static_assert(std::is_same_v<decltype(&FUNC_EXIT), LibLoader::plugin_func_ptr>);
     using namespace MiraiCP;
-    Logger::logger.info("开始禁用插件：" + MiraiCP::CPPPlugin::config.id);
+    Logger::logger.info("开始禁用插件：" + MiraiCP::CPPPlugin::config.getId());
     Event::clear();
     if (CPPPlugin::plugin != nullptr) CPPPlugin::plugin->onDisable();
     CPPPlugin::plugin.reset();
@@ -1455,9 +1457,10 @@ void FUNC_EXIT() {
 }
 /// 消息解析分流
 /// env != null, call from jni
-void FUNC_EVENT(std::string content) {
+MIRAICP_EXPORT void FUNC_EVENT(const char *c) {
     static_assert(std::is_same_v<decltype(&FUNC_EVENT), LibLoader::plugin_event_func_ptr>);
     using namespace MiraiCP;
+    std::string content = c;
     json j;
     try {
         j = json::parse(content);
@@ -1489,9 +1492,9 @@ void FUNC_EVENT(std::string content) {
 /// 获取 Plugin Info
 /// 如果未正确定义，插件无法正确加载
 /// 该函数不可调用loader api；因为会在入口函数调用前先调用，loader api未初始化
-const MiraiCP::PluginConfig &PLUGIN_INFO() {
+MIRAICP_EXPORT const MiraiCP::PluginConfig &PLUGIN_INFO() {
     static_assert(std::is_same_v<decltype(&PLUGIN_INFO), LibLoader::plugin_info_func_ptr>);
-    if (MiraiCP::CPPPlugin::config.id.empty())
+    if (MiraiCP::CPPPlugin::config.getId().empty())
         throw std::exception();
     return MiraiCP::CPPPlugin::config;
 }
@@ -1512,5 +1515,93 @@ namespace MiraiCP {
     }
     std::string PluginConfig::serialize2string() {
         return serialize().dump();
+    }
+} // namespace MiraiCP
+//from common/miraicpString.cpp
+// Copyright (c) 2022. Eritque arcus and contributors.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or any later version(in your opinion).
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+#ifdef MIRAICP_LIB_LOADER
+#endif
+#include <cstring>
+namespace MiraiCP {
+    void swap(MiraiCPString &a, MiraiCPString &b) noexcept {
+        std::swap(a.str, b.str);
+        std::swap(a._size, b._size);
+        std::swap(a.free_this, b.free_this);
+    }
+    // avoid calling this if _size == 0
+    void MiraiCPString::construction() {
+        str = (char *) ::std::malloc(sizeof(char) * (_size + 1));
+        if (str == nullptr) {
+#ifdef MIRAICP_LIB_LOADER
+            LibLoader::logger.error("MiraiCPString::construction: malloc failed when trying to malloc size " + std::to_string(_size + 1));
+#endif
+            throw std::bad_alloc();
+        }
+    }
+    MiraiCPString::~MiraiCPString() { // do not inherit MiraiCPString!!
+        if (str != nullptr) {
+            // ensure deconstruction is paired to construction
+            free_this(str);
+            str = nullptr;
+        }
+    }
+    MiraiCPString::MiraiCPString(const MiraiCPString &other) : str(nullptr), _size(other._size), free_this(std_free_ptr) {
+        if (_size == 0) return;
+        construction();
+        assert(str != nullptr);
+        memcpy(str, other.str, _size * sizeof(char));
+        str[_size] = 0;
+    }
+    MiraiCPString::MiraiCPString(MiraiCPString &&temp) noexcept : MiraiCPString() {
+        swap(*this, temp);
+    }
+    MiraiCPString::MiraiCPString(const char *char_str) : MiraiCPString() {
+        if (char_str == nullptr) return;
+        _size = strlen(char_str);
+        if (0 == _size) return;
+        construction();
+        assert(str != nullptr);
+        memcpy(str, char_str, _size * sizeof(char));
+        str[_size] = 0;
+    }
+    MiraiCPString::MiraiCPString(const std::string &string_str) {
+        _size = string_str.size();
+        if (!_size) return;
+        construction();
+        assert(str != nullptr);
+        memcpy(str, string_str.c_str(), _size * sizeof(char));
+        str[_size] = 0;
+    }
+    const char *MiraiCPString::copyToCharPtr() const {
+        if (str == nullptr || _size == 0) return new char[1]{0};
+        char *t = new char[_size + 1];
+        memcpy(t, str, (_size + 1) * sizeof(char));
+        return t;
+    }
+    bool MiraiCPString::operator==(const MiraiCPString &another) const {
+        return another._size == _size && (_size == 0 || strcmp(another.str, str) == 0);
+    }
+    MiraiCPString &MiraiCPString::operator=(const MiraiCPString &another) {
+        MiraiCPString temp(another);
+        std::swap(*this, temp);
+        return *this;
+    }
+    MiraiCPString &MiraiCPString::operator=(MiraiCPString &&another) noexcept {
+        std::swap(*this, another);
+        return *this;
     }
 } // namespace MiraiCP
