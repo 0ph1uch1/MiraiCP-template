@@ -1,7 +1,7 @@
 # 最低cmake版本
 cmake_minimum_required(VERSION 3.10)
 
-# MSVC设置：以utf8编译
+# MSVC设置: 以utf8编译
 add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 
@@ -26,11 +26,19 @@ file(GLOB PLUGIN_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 
 # 添加动态库编译目标
 add_library(
-    MiraiCPPlugin
-    SHARED
-    single_include/MiraiCP/MiraiCP.cpp # MiraiCP 源文件
-    ${PLUGIN_SOURCE_PATH}
+        MiraiCPPlugin
+        SHARED
+        single_include/MiraiCP/MiraiCP.cpp # MiraiCP 源文件
+        ${PLUGIN_SOURCE_PATH}
 )
 
 # 引入全部头文件路径
 target_include_directories(MiraiCPPlugin PUBLIC ${SOURCE_HEADER_PATH})
+
+# 插件移植性
+if (WIN32)
+    target_link_libraries(MiraiCPPlugin -static)
+endif (WIN32)
+if (UNIX)
+    target_link_libraries(MiraiCPPlugin -static-libstdc++ -static-libgcc)
+endif (UNIX)
