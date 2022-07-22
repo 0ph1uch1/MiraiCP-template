@@ -22,7 +22,7 @@ jobs:
                type: "commit",
                tagger: {
                  name: "Eritque arcus",
-                 email: "1930893235@qq.com"
+                 email: "eritque-arcus@eritque-arcus.tech"
                }
              });
              github.rest.git.createRef({
