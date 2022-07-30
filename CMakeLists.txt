@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.10)
 # MSVC设置: 以utf8编译
 add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+# MSVC设置: 异常处理模型
+add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/EHa>")
+add_compile_options("$<$<C_COMPILER_ID:MSVC>:/EHa>")
 
 # C++ 标准：17+
 set(CMAKE_CXX_STANDARD 17)
