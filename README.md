@@ -13,7 +13,7 @@
   - Windows上使用Visual Studio开发：首先需要[下载cmake](https://cmake.org/download/)并确保`cmake`已经被添加到`PATH`。在本目录下新建文件夹`build`，在`build`文件夹中打开powershell窗口，执行
 
     ```powershell
-    cmake .. --config Release
+    cmake .. -DCMAKE_GENERATOR_PLATFORM=x64 --config Release
     ```
 
     即可生成Visual Studio项目。双击`MiraiCPPlugin.sln`打开项目编写、编译。
