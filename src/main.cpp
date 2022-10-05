@@ -7,7 +7,7 @@ const PluginConfig CPPPlugin::config{
         "Plugin name",        // 插件名称
         "Version",            // 插件版本
         "Author name",        // 插件作者
-        "Plugin description"  // 可选：插件描述
+        "Plugin description",  // 可选：插件描述
         "Publish time"        // 可选：日期
 };
 

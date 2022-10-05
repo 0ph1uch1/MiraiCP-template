@@ -25,13 +25,14 @@ set(SOURCE_HEADER_PATH
 )
 
 # 添加src目录下所有源文件（每次新增文件不要修改cmake，只需重新执行cmake命令）
-file(GLOB PLUGIN_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+# file(GLOB PLUGIN_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 
 # 添加动态库编译目标
 add_library(
         MiraiCPPlugin
         SHARED
-        single_include/MiraiCP/MiraiCP.cpp # MiraiCP 源文件
+        ${CMAKE_CURRENT_SOURCE_DIR}/single_include/MiraiCP/MiraiCP.cpp # MiraiCP 源文件
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
         ${PLUGIN_SOURCE_PATH}
 )
 
