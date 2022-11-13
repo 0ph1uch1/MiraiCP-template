@@ -2089,4 +2089,5 @@ namespace MiraiCP::Redirector {
     MIRAICP_EXPORT void SetCerrRecorder(void (*recorder)(std::string)) {
         errTarget.setRecorder(recorder);
     }
+
 } // namespace MiraiCP::Redirector
