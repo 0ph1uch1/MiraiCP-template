@@ -108,7 +108,7 @@ static_assert(false, "Unsupported platform");
 #define ShouldNotUse(msg)
 #endif
 // assert
-#include "cassert"
+#include <cassert>
 #ifndef assert
 #define assert(ignore) ((void) 0)
 #endif
@@ -123,40 +123,6 @@ static_assert(false, "Unsupported platform");
 #define __STRINGIFY(A) #A
 #endif
 // defer tool, works like the defer key word in Golang.
-// #include "commonTools.h"
-// Copyright (c) 2022. Eritque arcus and contributors.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as
-// published by the Free Software Foundation, either version 3 of the
-// License, or any later version(in your opinion).
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-//
-#ifndef MIRAICP_PRO_COMMONTOOLS_H
-#define MIRAICP_PRO_COMMONTOOLS_H
-// #include "MiraiCPMacros.h"
-#include <functional>
-namespace CommonTools {
-    /// defer class
-    /// @see MIRAICP_DEFER
-    class MiraiCPDefer {
-    public:
-        std::function<void()> defer_func;
-        MiraiCPDefer(std::function<void()> func) : defer_func(std::move(func)) {
-        }
-        ~MiraiCPDefer() {
-            defer_func();
-        }
-    };
-} // namespace CommonTools
-#endif //MIRAICP_PRO_COMMONTOOLS_H
 #define MIRAICP_DEFER(code)                                                   \
     auto TOKEN_PASTE(_defered_statement_wrapper_, __LINE__) = [&]() { code }; \
     CommonTools::MiraiCPDefer TOKEN_PASTE(_defered_object_, __LINE__)(std::move(TOKEN_PASTE(_defered_statement_wrapper_, __LINE__)))
@@ -217,6 +183,7 @@ namespace CommonTools {
 #ifndef MIRAICP_PRO_MIRAICPSTRINGINTERNAL_H
 #define MIRAICP_PRO_MIRAICPSTRINGINTERNAL_H
 // #include "MiraiCPMacros.h"
+// -----------------------
 #include <cassert>
 #include <string>
 namespace MiraiCP {
@@ -285,9 +252,11 @@ namespace MiraiCP {
 #ifndef MIRAICP_PRO_PLATFORMTHREADING_H
 #define MIRAICP_PRO_PLATFORMTHREADING_H
 // #include "MiraiCPMacros.h"
+// -----------------------
 #if MIRAICP_MSVC
 #include <Windows.h>
 #include <processthreadsapi.h>
+#include <string>
 inline void *platform_thread_self() {
     return GetCurrentThread();
 }
@@ -323,7 +292,7 @@ inline void platform_get_thread_name(decltype(platform_thread_self()) id, char *
 // #include "MiraiCPStringInternal.h"
 #include <json.hpp>
 namespace MiraiCP {
-    inline const std::string MiraiCPVersion = "v2.13.0-alpha";
+    inline const std::string MiraiCPVersion = "v2.13.0-alpha-2";
     struct PluginConfig {
         /// @brief 插件id, 要与别人不一样否则报错无法加载(建议用类包格式，如: io.github.nambers)
         const char *id = nullptr;
@@ -385,6 +354,7 @@ namespace MiraiCP {
 #ifndef MIRAICP_PRO_COMMONTOOLS_H
 #define MIRAICP_PRO_COMMONTOOLS_H
 // #include "MiraiCPMacros.h"
+// -----------------------
 #include <functional>
 namespace CommonTools {
     /// defer class
@@ -419,6 +389,7 @@ namespace CommonTools {
 #define MIRAICP_PRO_COMMONTYPES_H
 // don't create cpp for this header
 // #include "MiraiCPMacros.h"
+// -----------------------
 // #include "PluginConfig.h"
 // #include "loaderApiInternal.h"
 // Copyright (c) 2022. Eritque arcus and contributors.
@@ -910,9 +881,13 @@ namespace MiraiCP {
 // #include "MessageChain.h"
 #ifndef MIRAICP_PRO_MESSAGECHAIN_H
 #define MIRAICP_PRO_MESSAGECHAIN_H
+// #include "MiraiCPMacros.h"
+// -----------------------
 // #include "Exception.h"
 #ifndef MIRAICP_PRO_EXCEPTION_H
 #define MIRAICP_PRO_EXCEPTION_H
+// #include "MiraiCPMacros.h"
+// -----------------------
 // #include "CPPPlugin.h"
 #ifndef MIRAICP_PRO_CPPPLUGIN_H
 #define MIRAICP_PRO_CPPPLUGIN_H
@@ -1130,7 +1105,6 @@ namespace MiraiCP {
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_CPPPLUGIN_H
-// #include "MiraiCPMacros.h"
 #include <exception>
 #include <string>
 #include <thread>
@@ -1385,7 +1359,6 @@ namespace MiraiCP {
     }
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_EXCEPTION_H
-// #include "MiraiCPMacros.h"
 // #include "SingleMessage.h"
 #ifndef MIRAICP_PRO_SINGLEMESSAGE_H
 #define MIRAICP_PRO_SINGLEMESSAGE_H
@@ -1393,6 +1366,7 @@ namespace MiraiCP {
 #ifndef MIRAICP_PRO_MESSAGESOURCE_H
 #define MIRAICP_PRO_MESSAGESOURCE_H
 // #include "MiraiCPMacros.h"
+// -----------------------
 // #include "commonTypes.h"
 #include <string>
 namespace MiraiCP {
@@ -2123,7 +2097,7 @@ namespace MiraiCP {
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_MESSAGECHAIN_H
-#include <json.hpp>
+#include <json_fwd.hpp>
 #include <string>
 namespace MiraiCP {
     /// Contact 类型
@@ -2590,7 +2564,7 @@ namespace MiraiCP {
 // #include "KtOperation.h"
 // #include "LowLevelAPI.h"
 // #include "MessageChain.h"
-#include <json.hpp>
+#include <json_fwd.hpp>
 #include <string>
 namespace MiraiCP {
     /// Contact 类型
@@ -2884,7 +2858,6 @@ namespace MiraiCP {
 #endif //MIRAICP_PRO_CONTACT_H
 #ifndef MIRAICP_PRO_EVENT_H
 #define MIRAICP_PRO_EVENT_H
-#include <utility>
 // #include "Bot.h"
 // #include "Friend.h"
 #ifndef MIRAICP_PRO_FRIEND_H
@@ -3204,6 +3177,7 @@ namespace MiraiCP {
     };
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_MEMBER_H
+#include <utility>
 namespace MiraiCP {
     /// Event 工厂
     namespace eventTypes {
@@ -3877,7 +3851,7 @@ namespace MiraiCP {
         static std::shared_ptr<NodeHandle> registerEvent(std::function<void(EventClass)> callback, priority_level level = 100) {
             static_assert(std::is_base_of_v<MiraiCPEvent, EventClass>, "只支持注册MiraiCPEvent的派生类事件");
             std::function<bool(MiraiCPEvent *)> tmp = [=](MiraiCPEvent *p) {
-                callback(*dynamic_cast<EventClass *>(p));
+                callback(*static_cast<EventClass *>(p));
                 return false;
             };
             auto t = eventNode(tmp);
@@ -3911,8 +3885,9 @@ namespace MiraiCP {
 #endif //MIRAICP_PRO_EVENT_H
 #ifndef MIRAICP_PRO_EXCEPTION_H
 #define MIRAICP_PRO_EXCEPTION_H
-// #include "CPPPlugin.h"
 // #include "MiraiCPMacros.h"
+// -----------------------
+// #include "CPPPlugin.h"
 #include <exception>
 #include <string>
 #include <thread>
@@ -4955,8 +4930,9 @@ namespace MiraiCP {
 #endif //MIRAICP_PRO_MEMBER_H
 #ifndef MIRAICP_PRO_MESSAGECHAIN_H
 #define MIRAICP_PRO_MESSAGECHAIN_H
-// #include "Exception.h"
 // #include "MiraiCPMacros.h"
+// -----------------------
+// #include "Exception.h"
 // #include "SingleMessage.h"
 // #include "commonTools.h"
 namespace MiraiCP {
@@ -5209,6 +5185,7 @@ namespace MiraiCP {
 #ifndef MIRAICP_PRO_MESSAGESOURCE_H
 #define MIRAICP_PRO_MESSAGESOURCE_H
 // #include "MiraiCPMacros.h"
+// -----------------------
 // #include "commonTypes.h"
 #include <string>
 namespace MiraiCP {
@@ -5278,11 +5255,12 @@ namespace MiraiCP {
 //
 #ifndef MIRAICP_PRO_MIRAICPNEWTHREAD_H
 #define MIRAICP_PRO_MIRAICPNEWTHREAD_H
+// #include "MiraiCPMacros.h"
+// -----------------------
 // #include "CPPPlugin.h"
 // #include "Event.h"
 // #include "Exception.h"
 // #include "Logger.h"
-// #include "MiraiCPMacros.h"
 // #include "PlatformThreading.h"
 #include <ostream>
 #include <thread>
@@ -5394,15 +5372,23 @@ namespace MiraiCP {
 //
 #ifndef MIRAICP_PRO_SCHEDULE_H
 #define MIRAICP_PRO_SCHEDULE_H
+#include <chrono>
 #include <string>
 namespace MiraiCP {
     /*!
      * @brief 定时任务, 在一定时间后广播**一次**TimeOutEvent
-     * @param time 在多少毫秒后执行
+     * @param sec 在多少秒后执行
      * @param msg 附加的string类型信息
-     * @doxygenEg{1017, schedule.cpp, 定时任务}
+     * @doxygenEg{1017, Schedule.h, 定时任务}
      */
-    void schedule(size_t time, std::string msg);
+    void schedule(size_t sec, std::string msg);
+    /*!
+     * @brief 定时任务, 在一定时间后广播**一次**TimeOutEvent，chrono重载
+     * @param sec 在多少秒后执行
+     * @param msg 附加的string类型信息
+     * @doxygenEg{1017, Schedule.h, 定时任务}
+     */
+    void schedule(std::chrono::seconds sec, std::string msg);
 } // namespace MiraiCP
 #endif //MIRAICP_PRO_SCHEDULE_H
 #ifndef MIRAICP_PRO_SINGLEMESSAGE_H
@@ -5920,6 +5906,7 @@ namespace MiraiCP::ThreadTask {
 #ifndef MIRAICP_PRO_TOOLS_H
 #define MIRAICP_PRO_TOOLS_H
 // #include "MiraiCPMacros.h"
+// -----------------------
 // #include "commonTypes.h"
 #include <sstream>
 #include <string>
@@ -6062,14 +6049,17 @@ namespace MiraiCP::LoaderApi {
 // #include "PluginConfig.h"
 // #include "commonTypes.h"
 namespace MiraiCP {
-    /// 注册插件函数, 需要被实现, 类似onStart();
+    /// 注册插件函数, 需要被插件实现, 类似onStart();
     void enrollPlugin();
     /// 用指针绑定插件
-    inline void enrollPlugin(CPPPlugin *p) {
+    [[deprecated("use enrollPlugin<T> instead")]] inline void enrollPlugin(CPPPlugin *p) {
         CPPPlugin::plugin.reset(p);
     }
-    [[deprecated("use enrollPlugin instead")]] inline void enrollPlugin0(CPPPlugin *p) {
-        enrollPlugin(p);
+    /// @note dev: 为防止用户插件crash造成内存泄漏等问题，改为用安全一些的make_unique
+    template<typename T>
+    inline void enrollPlugin() {
+        static_assert(std::is_base_of_v<CPPPlugin, T>, "Enrolling plugin type T should be inherited from CPPPlugin");
+        CPPPlugin::plugin = std::make_unique<T>();
     }
 } // namespace MiraiCP
 extern "C" {

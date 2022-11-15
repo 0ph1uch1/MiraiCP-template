@@ -463,7 +463,6 @@ namespace MiraiCP {
     }
 } // namespace MiraiCP
 //from include/ForwardedMessage.cpp
-#include <utility>
 namespace MiraiCP {
     using json = nlohmann::json;
     ForwardedNode::ForwardedNode(QQID id, std::string name, ForwardedMessage _message, int t, std::optional<ForwardedMessageDisplayStrategy> display)
@@ -827,6 +826,7 @@ namespace MiraiCP {
     }
 } // namespace MiraiCP
 //from include/KtOperation.cpp
+// -----------------------
 namespace MiraiCP::KtOperation {
     std::string ktOperation(operation_set type, nlohmann::json data, bool catchErr, const std::string &errorInfo) {
         nlohmann::json j{{"type",type},{"data", std::move(data)}};
@@ -921,39 +921,6 @@ namespace MiraiCP {
             needrefresh = true;
         if (needrefresh) forceRefreshNextTime();
     }
-    IMPL_GETTER(anonymous)
-    //
-    //    void Member::refreshInfo() {
-    //        this->isAnonymous = this->_anonymous;
-    //        if (isAnonymous)
-    //            return;
-    //        std::string temp = LowLevelAPI::getInfoSource(this->toString());
-    //        if (temp == "E1")
-    //            throw MemberException(1, MIRAICP_EXCEPTION_WHERE);
-    //        if (temp == "E2")
-    //            throw MemberException(2, MIRAICP_EXCEPTION_WHERE);
-    //        LowLevelAPI::info tmp = LowLevelAPI::info0(temp);
-    //        this->_nickOrNameCard = tmp.nickornamecard;
-    //        this->_avatarUrl = tmp.avatarUrl;
-    //        if (isAnonymous) {
-    //            this->permission = 0;
-    //        } else {
-    //            json j;
-    //            j["contactSource"] = this->toString();
-    //            std::string re = KtOperation::ktOperation(KtOperation::QueryM, j);
-    //            this->permission = stoi(re);
-    //        }
-    //        if (temp == "E1") {
-    //            throw MemberException(1, MIRAICP_EXCEPTION_WHERE);
-    //        }
-    //        if (temp == "E2") {
-    //            throw MemberException(2, MIRAICP_EXCEPTION_WHERE);
-    //        }
-    //    }
-    //
-    //    unsigned int Member::getPermission() const {
-    //        if (isAnonymous) return 0;
-    //    }
     void Member::mute(long long sec) const {
         json j{{"time", sec}, {"contactSource", toString()}};
         std::string re = KtOperation::ktOperation(KtOperation::MuteM, std::move(j));
@@ -1007,6 +974,8 @@ namespace MiraiCP {
             _permission = stoi(KtOperation::ktOperation(KtOperation::QueryM, std::move(j)));
         }
     }
+    IMPL_GETTER(anonymous)
+    IMPL_GETTER(permission)
 #undef LOC_CLASS_NAMESPACE
 } // namespace MiraiCP
 //from include/MessageChain.cpp
@@ -1221,11 +1190,14 @@ namespace MiraiCP {
 //
 // Created by antares on 11/10/22.
 //
-// todo(Antares): 之后改为优先队列，轮询，降低线程池的占用
 void MiraiCP::schedule(size_t time, std::string msg) {
+    schedule(std::chrono::seconds(time), std::move(msg));
+}
+// todo(Antares): 之后改为优先队列，轮询，降低线程池的占用
+void MiraiCP::schedule(std::chrono::seconds sec, std::string msg) {
     ThreadTask::addTask(
-            [time](std::string t) {
-                std::this_thread::sleep_for(std::chrono::seconds(time));
+            [sec](std::string t) {
+                std::this_thread::sleep_for(sec);
                 Event::broadcast(TimeOutEvent(std::move(t)));
             },
             std::move(msg));
@@ -1584,18 +1556,29 @@ namespace MiraiCP::Tools {
         }
         return str;
     }
+    inline void split(const std::string &s, std::vector<std::string> &tokens, const std::string &delimiters = ",") {
+        std::string::size_type lastPos = s.find_first_not_of(delimiters, 0);
+        std::string::size_type pos = s.find_first_of(delimiters, lastPos);
+        while (std::string::npos != pos || std::string::npos != lastPos) {
+            tokens.emplace_back(s.substr(lastPos, pos - lastPos));
+            lastPos = s.find_first_not_of(delimiters, pos);
+            pos = s.find_first_of(delimiters, lastPos);
+        }
+    }
     std::vector<QQID> StringToVector(std::string temp) {
-        std::vector<QQID> result;
-        temp.erase(temp.begin());
-        temp.pop_back();
-        std::regex ws_re("[,]+");
-        std::vector<std::string> v(std::sregex_token_iterator(temp.begin(), temp.end(), ws_re, -1),
-                                   std::sregex_token_iterator());
-        result.reserve(v.size());
-        std::for_each(v.begin(), v.end(), [&](auto &&s) { result.emplace_back(std::stoull(s)); });
-        // for (auto &&s: v)
-        //     result.emplace_back(std::stoull(s));
-        return result;
+        if (temp.empty()) return {};
+        if (temp[0] == '[' && temp[temp.size() - 1] == ']') {
+            temp.erase(temp.begin());
+            temp.pop_back();
+        }
+        std::vector<std::string> strResult;
+        split(temp, strResult);
+        std::vector<QQID> ans;
+        ans.reserve(strResult.size());
+        for (auto &str: strResult) {
+            ans.emplace_back(stoull(str));
+        }
+        return ans;
     }
     std::string escapeFromMiraiCode(const std::string &s) {
         //[	\[
@@ -1742,6 +1725,7 @@ namespace MiraiCP::LoaderApi {
     }
 } // namespace MiraiCP::LoaderApi
 //from include/utils.cpp
+// -----------------------
 #include <iostream>
 // 开始对接libloader接口代码
 using json = nlohmann::json;
@@ -1769,16 +1753,16 @@ MIRAICP_EXPORT void FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &f
         std::cerr.flush();
         e.raise();
         Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
-        throw IllegalStateException(e.what(), e.filename, e.lineNum);
+        // throw IllegalStateException(e.what(), e.filename, e.lineNum);
     } catch (const std::exception &e) {
         std::cerr.flush();
         Logger::logger.error(e.what());
         Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
-        throw IllegalStateException(e.what(), MIRAICP_EXCEPTION_WHERE);
+        // throw IllegalStateException(e.what(), MIRAICP_EXCEPTION_WHERE);
     } catch (...) {
         std::cerr.flush();
         Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
-        throw IllegalStateException("", MIRAICP_EXCEPTION_WHERE);
+        // throw IllegalStateException("", MIRAICP_EXCEPTION_WHERE);
     }
 }
 /// 插件结束(也可能是暂时的disable)
@@ -1853,6 +1837,7 @@ MIRAICP_EXPORT const MiraiCP::PluginConfig *PLUGIN_INFO() {
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
+// -----------------------
 #ifdef MIRAICP_LIB_LOADER
 #endif
 #include <cstring>
@@ -1959,6 +1944,7 @@ namespace MiraiCP {
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
+// -----------------------
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -2089,5 +2075,4 @@ namespace MiraiCP::Redirector {
     MIRAICP_EXPORT void SetCerrRecorder(void (*recorder)(std::string)) {
         errTarget.setRecorder(recorder);
     }
-
 } // namespace MiraiCP::Redirector
