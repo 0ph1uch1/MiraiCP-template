@@ -1,6 +1,9 @@
 # self defined
 build/
 cmake*/
+.vscode/
+.vs/
+.idea/
 
 # Prerequisites
 *.d
