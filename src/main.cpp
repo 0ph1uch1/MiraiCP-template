@@ -29,8 +29,8 @@ public:
   }
 };
 
-// 绑定当前插件实例。需传入enrollPlugin()一个用new生成的Main指针，
-// 不可以传入静态或栈上分配的Main对象地址；该对象生命周期将交给MiraiCP管理
+// 创建当前插件实例。请不要进行其他操作，
+// 初始化请在onEnable中进行
 void MiraiCP::enrollPlugin() {
-  MiraiCP::enrollPlugin(new PluginMain);
+  MiraiCP::enrollPlugin<PluginMain>();
 }
