@@ -148,6 +148,11 @@ static_assert(false, "Unsupported platform");
 #undef MIRAICP_EXPORT
 #define MIRAICP_EXPORT __declspec(dllexport)
 #endif
+#else
+#ifndef GOOGLE_TEST
+#undef MIRAICP_EXPORT
+#define MIRAICP_EXPORT __attribute__((visibility("default")))
+#endif
 #endif
 // data locker
 #define MIRAICP_DATALOCK std::shared_lock<std::shared_mutex> TOKEN_PASTE(local_lck_, __LINE__)(InternalData->getMutex())
@@ -292,7 +297,8 @@ inline void platform_get_thread_name(decltype(platform_thread_self()) id, char *
 // #include "MiraiCPStringInternal.h"
 #include <json.hpp>
 namespace MiraiCP {
-    inline const std::string MiraiCPVersion = "v2.13.0-alpha-2";
+    constexpr const char *m_MiraiCPVersion = "v2.13.0-alpha-3";
+    inline const std::string MiraiCPVersion = m_MiraiCPVersion;
     struct PluginConfig {
         /// @brief 插件id, 要与别人不一样否则报错无法加载(建议用类包格式，如: io.github.nambers)
         const char *id = nullptr;
@@ -306,7 +312,7 @@ namespace MiraiCP {
         const char *description = "";
         /// @brief [optional]构建时间, 默认为__DATE__宏
         const char *time = __DATE__;
-        const char *mversion = MiraiCPVersion.c_str();
+        const char *mversion = m_MiraiCPVersion;
         std::string getId() const {
             return {id};
         }
@@ -1166,7 +1172,7 @@ namespace MiraiCP {
     /// @brief 通用MiraiCP异常
     /// @param const string &description, string _filename, int _lineNum
     /// @see MiraiCPExceptionBase
-    MIRAICP_EXPORT typedef MiraiCPExceptionCRTP<MiraiCPExceptionBase> MiraiCPException;
+    class MIRAICP_EXPORT MiraiCPException : public MiraiCPExceptionCRTP<MiraiCPExceptionBase> {};
     /// 文件读取异常.
     /// @see MiraiCPExceptionBase
     class MIRAICP_EXPORT UploadException : public MiraiCPExceptionCRTP<UploadException> {
@@ -1203,7 +1209,7 @@ namespace MiraiCP {
         int timeRemain;
     public:
         explicit BotIsBeingMutedException(int t, string _filename, int _lineNum) : MiraiCPExceptionCRTP(
-                "发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t), std::move(_filename), _lineNum),
+                                                                                           "发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t), std::move(_filename), _lineNum),
                                                                                    timeRemain(t) {}
         static string exceptionType() { return "BotIsBeingMutedException"; }
     };
@@ -2333,7 +2339,7 @@ namespace MiraiCP {
         /// 发送纯文本信息
         /// @throw IllegalArgumentException, TimeOutException, BotIsBeingMutedException
         MessageSource sendMsgImpl(std::string msg, int retryTime, bool miraicode = false) const;
-        MessageSource unpackMsg(const SingleMessage &msg, int retryTime) const {
+        MessageSource unpackMsg(const MiraiCodeable &msg, int retryTime) const {
             return sendMsgImpl(msg.toMiraiCode(), retryTime, true);
         }
         MessageSource unpackMsg(std::string msg, int retryTime) const {
@@ -2800,7 +2806,7 @@ namespace MiraiCP {
         /// 发送纯文本信息
         /// @throw IllegalArgumentException, TimeOutException, BotIsBeingMutedException
         MessageSource sendMsgImpl(std::string msg, int retryTime, bool miraicode = false) const;
-        MessageSource unpackMsg(const SingleMessage &msg, int retryTime) const {
+        MessageSource unpackMsg(const MiraiCodeable &msg, int retryTime) const {
             return sendMsgImpl(msg.toMiraiCode(), retryTime, true);
         }
         MessageSource unpackMsg(std::string msg, int retryTime) const {
@@ -3023,9 +3029,10 @@ namespace MiraiCP {
         /**
          * @brief 更新群设置, 即覆盖服务器上的群设置
          * @details 从服务器拉去群设置用refreshInfo
+         * @param newSetting 新的设置
          * @see Group::refreshInfo()
          */
-        void updateSetting();
+        void updateSetting(GroupData::GroupSetting newSetting);
         /// 取群成员列表
         /// @return vector<long>
         std::vector<unsigned long long> getMemberList();
@@ -3949,7 +3956,7 @@ namespace MiraiCP {
     /// @brief 通用MiraiCP异常
     /// @param const string &description, string _filename, int _lineNum
     /// @see MiraiCPExceptionBase
-    MIRAICP_EXPORT typedef MiraiCPExceptionCRTP<MiraiCPExceptionBase> MiraiCPException;
+    class MIRAICP_EXPORT MiraiCPException : public MiraiCPExceptionCRTP<MiraiCPExceptionBase> {};
     /// 文件读取异常.
     /// @see MiraiCPExceptionBase
     class MIRAICP_EXPORT UploadException : public MiraiCPExceptionCRTP<UploadException> {
@@ -3986,7 +3993,7 @@ namespace MiraiCP {
         int timeRemain;
     public:
         explicit BotIsBeingMutedException(int t, string _filename, int _lineNum) : MiraiCPExceptionCRTP(
-                "发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t), std::move(_filename), _lineNum),
+                                                                                           "发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t), std::move(_filename), _lineNum),
                                                                                    timeRemain(t) {}
         static string exceptionType() { return "BotIsBeingMutedException"; }
     };
@@ -4462,9 +4469,10 @@ namespace MiraiCP {
         /**
          * @brief 更新群设置, 即覆盖服务器上的群设置
          * @details 从服务器拉去群设置用refreshInfo
+         * @param newSetting 新的设置
          * @see Group::refreshInfo()
          */
-        void updateSetting();
+        void updateSetting(GroupData::GroupSetting newSetting);
         /// 取群成员列表
         /// @return vector<long>
         std::vector<unsigned long long> getMemberList();
@@ -5912,7 +5920,7 @@ namespace MiraiCP::ThreadTask {
 #include <string>
 #include <vector>
 namespace MiraiCP {
-    /// @brief 工具类声明, 常用的一些转换工具, 如需转码使用std::filesystem
+    /// @brief 工具类声明, 常用的一些转换工具
     namespace Tools {
         /*!
          * @brief 替换全部在一个字符串中.
