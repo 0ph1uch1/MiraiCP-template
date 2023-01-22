@@ -1,5 +1,5 @@
 # 最低cmake版本
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.14)
 
 # 声明C++项目
 project(MiraiCPPlugin LANGUAGES CXX)
@@ -25,10 +25,10 @@ if(MSVC)
     SET(CMAKE_GENERATOR_PLATFORM x64)
 
     # C++17标准；以utf8编译；异常处理模型：标准 C++ stack unwinding；启用多线程编译；禁止无返回值的函数；禁用两个与dll export相关的warning；加入__cplusplus宏支持
-    add_compile_options(/utf-8 /EHa /MP /we4715 /wd4251 /wd4275 /Zc:__cplusplus)
+    add_compile_options(/EHs /MP /std:c++17 /we4715 /wd4251 /wd4275 /wd4068 /Zc:__cplusplus)
 
     # Disable RTTI
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /GR-")
+    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /GR-")
 else()
     # 禁止无返回值的函数
     add_compile_options(-Wall -Werror=return-type)
