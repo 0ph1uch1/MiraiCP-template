@@ -466,7 +466,7 @@ namespace MiraiCP {
                         j.eventData.contains("contact") ? Contact::deserializeToPointer(Tools::json_jsonmover(j.eventData, "contact")) : nullptr,
                         Bot(j.botId),
                         MessageChain::deserializationFromMessageJson(
-                                j.eventData.contains("message") ? Tools::json_jsonmover(j.eventData, "message") : ""));
+                                json::parse(Tools::json_stringmover(j.eventData, "message"))));
                 break;
             }
             default: {
@@ -1057,6 +1057,12 @@ namespace MiraiCP {
         KtOperation::ktOperation(KtOperation::ModifyAdmin, j);
         forceRefreshNextTime();
     }
+    void Member::changeSpecialTitle(std::string_view title) {
+        if (anonymous()) return;
+        json j{{"title", title}, {"contact", toJson()}};
+        KtOperation::ktOperation(KtOperation::ChangeSpecialTitle, j);
+        forceRefreshNextTime();
+    }
     void Member::changeNameCard(std::string_view newName) {
         if (anonymous()) return;
         json j{{"contact", toJson()}, {"newName", newName}};
@@ -1087,11 +1093,16 @@ namespace MiraiCP {
             this->_avatarUrl = tmp.avatarUrl;
         }
         {
-            _permission = stoi(KtOperation::ktOperation(KtOperation::QueryM, internalToJson()));
+            result = KtOperation::ktOperation(KtOperation::QueryM, internalToJson());
+            MIRAICP_ERROR_HANDLE(result, "");
+            auto tmp = nlohmann::json::parse(result);
+            _permission = tmp["permission"];
+            _specialTitle = Tools::json_stringmover(tmp, "specialTitle");
         }
     }
     IMPL_GETTER(anonymous)
     IMPL_GETTER(permission)
+    IMPL_GETTER(specialTitle)
 #undef LOC_CLASS_NAMESPACE
 } // namespace MiraiCP
 //from src/sdk/MessageChain.cpp
@@ -2139,6 +2150,90 @@ namespace MiraiCP {
         return serialize().dump();
     }
 } // namespace MiraiCP
+//from src/common/ThreadIdentify.cpp
+//
+// Created by 60168 on 2023-1-25.
+//
+#include <mutex>
+#include <shared_mutex>
+#include <thread>
+#include <unordered_map>
+#if MIRAICP_MSVC /// Windows case
+#include <Windows.h>
+#include <processthreadsapi.h>
+#include <string>
+#define SET_THREADNAME(name)                                   \
+    size_t len = strlen(name);                                 \
+    std::wstring wst(len + 1, '#');                            \
+    size_t num_convert;                                        \
+    mbstowcs_s(&num_convert, &wst[0], len + 1, name, len + 1); \
+    SetThreadDescription(GetCurrentThread(), &wst[0])
+#define GET_THREADNAME(buffer, buffersize)                 \
+    wchar_t *wbuf;                                         \
+    GetThreadDescription(GetCurrentThread(), &wbuf);       \
+    size_t num_convert;                                    \
+    wcstombs_s(&num_convert, buf, bufsize, wbuf, bufsize); \
+    LocalFree(wbuf);
+#elif defined(_POSIX_THREADS) /// pthread case
+#ifdef PTHREAD_SET_SUPPORTED
+#define SET_THREADNAME(name) pthread_setname_np(pthread_self(), name)
+#else
+#define SET_THREADNAME(name)
+#endif
+#ifdef PTHREAD_GET_SUPPORTED
+#define GET_THREADNAME(buffer, buffersize) pthread_getname_np(pthread_self(), buffer, buffersize);
+#else
+#define GET_THREADNAME(buffer, buffersize) buffer[0] = 0
+#endif
+#else /// others
+#define SET_THREADNAME(name)
+#define GET_THREADNAME(buffer, buffersize) buffer[0] = 0
+#endif
+namespace ThreadIdentify {
+    thread_local bool isPoolThread = false;
+    thread_local bool isLoaderThread = false;
+    void IAmPoolThread() {
+        isPoolThread = true;
+        SET_THREADNAME("LoaderWorker");
+    }
+    bool isMePoolThread() {
+        return isPoolThread;
+    }
+    void IAmLoaderThread() {
+        isLoaderThread = true;
+        SET_THREADNAME("libLoader");
+    }
+    bool isMeLoaderThread() {
+        return isLoaderThread;
+    }
+    using id = std::thread::id;
+    std::unordered_map<id, std::string> Identify;
+    std::shared_mutex mtx;
+    void setMyThreadName(const std::string &name) {
+        std::unique_lock _lk(mtx);
+        auto success = Identify.insert({std::this_thread::get_id(), name}).second;
+        if (!success) {
+            // todo
+        }
+        std::string t;
+#if defined(_POSIX_THREADS) && defined(PTHREAD_SET_SUPPORTED)
+        // 受限于Linux内核，只取前15个char，否则会失败
+        if (name.size() > 15) {
+            t.append(std::string_view(name), 15);
+        } else {
+            t = name;
+        }
+        SET_THREADNAME(t.c_str());
+#else
+        t = name;
+        SET_THREADNAME(t.c_str());
+#endif
+    }
+    std::string identifyMe() {
+        std::shared_lock _lk(mtx);
+        return Identify[std::this_thread::get_id()];
+    }
+} // namespace ThreadIdentify
 //from src/common/redirectCout.cpp
 // Copyright (c) 2022. Eritque arcus and contributors.
 //
