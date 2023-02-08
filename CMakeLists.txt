@@ -25,7 +25,7 @@ if(MSVC)
     set(CMAKE_GENERATOR_PLATFORM x64)
 
     # C++17标准；异常处理模型：标准 C++ stack unwinding；启用多线程编译；禁止无返回值的函数；禁用两个与dll export相关的warning；加入__cplusplus宏支持
-    add_compile_options(/EHs /MP /std:c++17 /we4715 /wd4251 /wd4275 /wd4068 /Zc:__cplusplus)
+    add_compile_options(/EHs /MP /std:c++17 /we4715 /wd4251 /wd4275 /wd4068 /Zc:__cplusplus /source-charset:utf-8)
 else()
     # 禁止无返回值的函数
     add_compile_options(-Wall -Werror=return-type)
