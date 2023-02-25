@@ -1,8 +1,9 @@
 # 最低cmake版本
 cmake_minimum_required(VERSION 3.14)
 
+set(TARGET_NAME MiraiCPPlugin)
 # 声明C++项目
-project(MiraiCPPlugin LANGUAGES CXX)
+project(${TARGET_NAME} LANGUAGES CXX)
 
 # C++ 标准：17+
 set(CMAKE_CXX_STANDARD 17) # 可以为20
@@ -25,7 +26,7 @@ if(MSVC)
     set(CMAKE_GENERATOR_PLATFORM x64)
 
     # C++17标准；异常处理模型：标准 C++ stack unwinding；启用多线程编译；禁止无返回值的函数；禁用两个与dll export相关的warning；加入__cplusplus宏支持
-    add_compile_options(/EHs /MP /std:c++17 /we4715 /wd4251 /wd4275 /wd4068 /Zc:__cplusplus /source-charset:utf-8)
+    add_compile_options(/EHs /MP /std:c++17 /we4715 /wd4251 /wd4275 /wd4068 /Zc:__cplusplus /utf-8)
 else()
     # 禁止无返回值的函数
     add_compile_options(-Wall -Werror=return-type)
@@ -60,41 +61,41 @@ file(GLOB PLUGIN_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 
 # 添加动态库编译目标
 add_library(
-    MiraiCPPlugin
+    ${TARGET_NAME}
     SHARED
     single_include/MiraiCP/MiraiCP.cpp # MiraiCP 源文件
     ${PLUGIN_SOURCE_PATH}
 )
 
 # 引入全部头文件路径
-target_include_directories(MiraiCPPlugin PUBLIC ${SOURCE_HEADER_PATH})
+target_include_directories(${TARGET_NAME} PUBLIC ${SOURCE_HEADER_PATH})
 
 # 需要的预定义宏
-target_compile_definitions(MiraiCPPlugin PUBLIC JSON_MultipleHeaders=ON MIRAICP_LIB_SDK)
+target_compile_definitions(${TARGET_NAME} PUBLIC JSON_MultipleHeaders=ON MIRAICP_LIB_SDK)
 
 # 开启所有warning
-target_compile_options(MiraiCPPlugin PUBLIC -Wall)
+target_compile_options(${TARGET_NAME} PUBLIC -Wall)
 
 # 关闭所有warning
-# target_compile_options(MiraiCPPlugin PUBLIC -w)
+# target_compile_options(${TARGET_NAME} PUBLIC -w)
 
 # 保证插件移植性，注意如果存在无法静态链接的其他依赖，仍然无法移植
-set_target_properties(MiraiCPPlugin PROPERTIES LINK_SEARCH_START_STATIC 1)
-set_target_properties(MiraiCPPlugin PROPERTIES LINK_SEARCH_END_STATIC 1)
+set_target_properties(${TARGET_NAME} PROPERTIES LINK_SEARCH_START_STATIC 1)
+set_target_properties(${TARGET_NAME} PROPERTIES LINK_SEARCH_END_STATIC 1)
 
 if(WIN32)
     if(MSVC)
         if(CMAKE_BUILD_TYPE MATCHES ".*Rel.*")
-            target_compile_options(MiraiCPPlugin PUBLIC /MT)
+            target_compile_options(${TARGET_NAME} PUBLIC /MT)
         else()
-            target_compile_options(MiraiCPPlugin PUBLIC /MTd)
+            target_compile_options(${TARGET_NAME} PUBLIC /MTd)
         endif()
     else()
-        target_link_options(MiraiCPPlugin PUBLIC -static)
+        target_link_options(${TARGET_NAME} PUBLIC -static)
     endif(MSVC)
 endif(WIN32)
 
 if(UNIX)
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-    target_link_options(MiraiCPPlugin PUBLIC -static-libstdc++ -static-libgcc)
+    target_link_options(${TARGET_NAME} PUBLIC -static-libstdc++ -static-libgcc)
 endif(UNIX)
