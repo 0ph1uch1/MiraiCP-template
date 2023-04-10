@@ -224,7 +224,7 @@ namespace CommonTools {
 #define MIRAICP_PRO_PLUGINCONFIG_H
 #include <string>
 namespace MiraiCP {
-    constexpr const char *m_MiraiCPVersion = "v2.15.0-RC";
+    constexpr const char *m_MiraiCPVersion = "v2.15.0-RC2";
     inline const std::string MiraiCPVersion = m_MiraiCPVersion;
     struct PluginConfig {
         /// @brief 插件id, 要与别人不一样否则报错无法加载(建议用类包格式，如: io.github.nambers)
