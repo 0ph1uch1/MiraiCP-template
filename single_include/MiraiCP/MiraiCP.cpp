@@ -18,107 +18,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "MiraiCP.hpp"
-/// Friend.cpp START
-
-/// IContactData.h START
-#ifndef MIRAICP_PRO_ICONTACTDATA_H
-#define MIRAICP_PRO_ICONTACTDATA_H
-/// IMiraiData.h START
-#ifndef MIRAICP_PRO_IMIRAIDATA_H
-#define MIRAICP_PRO_IMIRAIDATA_H
-#include "json_fwd.hpp"
-#include <atomic>
-#include <shared_mutex>
-namespace MiraiCP {
-    /// 声明 Contact 类数据安全锁接口以及部分实现的抽象类
-    struct IMiraiData {
-    private:
-        /// 锁
-        struct MiraiDataLocker final {
-            /// 该数据是否上锁
-            std::shared_mutex _mtx;
-            /// 该数据是否已经初始化
-            std::atomic<bool> _inited = false;
-        };
-    protected:
-        /// 锁实例
-        mutable MiraiDataLocker Locker;
-    public:
-        IMiraiData() = default;
-        virtual ~IMiraiData() = default;
-    public:
-        /// 转为json, 由子类实现, 多线程安全(带锁)
-        nlohmann::json toJson() const;
-    protected:
-        /// 读入json数据, 由子类实现, 无锁
-        virtual void deserialize(nlohmann::json in_json) = 0;
-        /// 转为json, 由子类实现, 无锁
-        virtual nlohmann::json internalToJson() const = 0;
-        /**
-         * 转为json，internalToJson 的具体实现决定, 无锁
-         * @see internalToJson
-         */
-        nlohmann::json internalToString() const;
-    public:
-        /// 请求一次刷新数据, 但不保证会进行
-        void requestRefresh();
-        /*!
-         * @brief 确保下次调用 requestRefresh 时刷新数据
-         * @note 调用该函数本身不会刷新数据
-         * @see requestRefresh
-         */
-        void forceRefreshNextTime();
-        /// 序列化为string, 带锁
-        std::string toString() const;
-        /// 获取锁
-        std::shared_mutex &getMutex() {
-            return Locker._mtx;
-        }
-    private:
-        /// 刷新数据, 由子类实现
-        virtual void refreshInfo() = 0;
-    };
-}
-#endif
-/// IMiraiData.h END
-
-namespace MiraiCP {
-    /// Contact 内部储存数据抽象类
-    struct IContactData : public IMiraiData {
-        /// 昵称或者群名片
-        std::string _nickOrNameCard;
-        /// 头像 url
-        std::string _avatarUrl;
-        /// id
-        QQID _id{};
-        /// 所属的 bot 的 id
-        QQID _botId{};
-        /// Contact 类型
-        ContactType _type = MIRAI_CONTACT;
-        void deserialize(nlohmann::json inJson) override;
-        nlohmann::json internalToJson() const override;
-        /// 刷新数据
-        void refreshInfo() override;
-        /**
-         * 更新传入 json 中的数据, 在调用后, 原 json 数据会被更新
-         * @param jsonToUpdate 需更新的 json 数据
-         * @see nlohmann::update
-         */
-        void updateJson(nlohmann::json &jsonToUpdate) const;
-    };
-}
-#endif
-/// IContactData.h END
-
-/// ExceptionHandle.h START
-#ifndef MIRAICP_PRO_EXCEPTIONHANDLE_H
-#define MIRAICP_PRO_EXCEPTIONHANDLE_H
-#include <string>
-namespace MiraiCP {
-    void ErrorHandle0(const std::string &name, int line, const std::string &re, const std::string &ErrorMsg = "");
-}
-#endif
-/// ExceptionHandle.h END
+/// MessageChain.cpp START
 
 /// IllegalArgument.h START
 #ifndef MIRAICP_PRO_EXCEPTION_ILLEGALARGUMENT_H
@@ -135,21 +35,6 @@ namespace MiraiCP {
 }
 #endif
 /// IllegalArgument.h END
-
-/// IllegalState.h START
-#ifndef MIRAICP_PRO_EXCEPTION_ILLEGALSTATE_H
-#define MIRAICP_PRO_EXCEPTION_ILLEGALSTATE_H
-namespace MiraiCP {
-    /// 通常为Mirai返回
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT IllegalStateException : public MiraiCPExceptionCRTP<IllegalStateException> {
-    public:
-        explicit IllegalStateException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("状态异常:" + text, std::move(_filename), _lineNum) {}
-        static std::string exceptionType() { return "IllegalStateException"; }
-    };
-}
-#endif
-/// IllegalState.h END
 
 /// KtOperation.h START
 #ifndef MIRAICP_PRO_KTOPERATION_H
@@ -261,55 +146,6 @@ namespace MiraiCP::KtOperation {
 }
 #endif
 /// KtOperation.h END
-
-namespace MiraiCP {
-    using json = nlohmann::json;
-    auto GetFriendPool(QQID id, QQID botid) noexcept {
-        static std::unordered_map<QQID, std::unordered_map<QQID, std::shared_ptr<Friend::DataType>>> Pool;
-        auto &val = Pool[botid][id];
-        if (!val) {
-            val = std::make_shared<Friend::DataType>();
-            val->_id = id;
-            val->_botId = botid;
-            val->_type = MIRAI_FRIEND;
-        }
-        return val;
-    }
-    auto GetFriendPool(const json &in_json) {
-        try {
-            return GetFriendPool(in_json["id"], in_json["id2"]);
-        } catch (const nlohmann::detail::exception &) {
-            throw IllegalArgumentException("构造Friend时传入的json异常", MIRAICP_EXCEPTION_WHERE);
-        }
-    }
-    /*好友类实现*/
-    Friend::Friend(QQID id, QQID botid) : Contact(GetFriendPool(id, botid)) {
-        forceRefreshNextTime();
-    }
-    Friend::Friend(nlohmann::json in_json) : Contact(GetFriendPool(in_json)) {
-        auto ActualDataPtr = GetDataInternal();
-        assert(ActualDataPtr != nullptr);
-        bool needRefresh = false;
-        if (in_json.contains("avatarUrl")) ActualDataPtr->_nickOrNameCard = json_stringmover(in_json, "nickOrNameCard");
-        else
-            needRefresh = true;
-        if (in_json.contains("avatarUrl")) ActualDataPtr->_avatarUrl = json_stringmover(in_json, "avatarUrl");
-        else
-            needRefresh = true;
-        if (needRefresh) forceRefreshNextTime();
-    }
-    void Friend::deleteFriend() {
-        json j{{"contact", this->toJson()}, {"quit", true}};
-        MIRAICP_ERROR_HANDLE(KtOperation::ktOperation(KtOperation::RefreshInfo, j), "");
-    }
-    void Friend::sendNudge() {
-        std::string re = KtOperation::ktOperation(KtOperation::SendNudge, toJson());
-        if (re == "E1")
-            throw IllegalStateException("发送戳一戳失败，登录协议不为phone/ipad", MIRAICP_EXCEPTION_WHERE);
-    }
-}
-/// Friend.cpp END
-/// MessageChain.cpp START
 
 #include <json.hpp>
 namespace MiraiCP {
@@ -536,22 +372,55 @@ namespace MiraiCP {
     };
 }
 /// MessageChain.cpp END
-/// MiraiCode.cpp START
+/// LowLevelAPI.cpp START
 
+/// LowLevelAPI.h START
+#ifndef MIRAICP_PRO_LOWLEVELAPI_H
+#define MIRAICP_PRO_LOWLEVELAPI_H
+#include "nlohmann/json_fwd.hpp"
 namespace MiraiCP {
-    std::string MiraiCode::toString() {
-        return Tools::escapeFromMiraiCode(this->content);
-    }
-    MiraiCode::MiraiCode(const std::string &a, bool convert) {
-        if (!convert)
-            content = a;
-        else
-            content = Tools::escapeToMiraiCode(a);
-    }
+    /// 较底层api
+    class LowLevelAPI {
+    public:
+        /// @brief 取该联系人的一些信息
+        /// @param c 该联系人Contact->serializationToString()
+        /// @return json格式字符串，待解析
+        static std::string getInfoSource(nlohmann::json c);
+        /*!
+         * @brief 上传图片
+         * @param path 本地地址
+         * @param c 上传的对象, Contact->serializationToString()
+         * @return string 待解析json
+         */
+        static std::string uploadImg0(std::string, nlohmann::json);
+        /// 每个对象的必有信息
+        struct info {
+            std::string nickOrNameCard;
+            std::string avatarUrl;
+        };
+        /// 获取每个对象必有信息
+        /// @see LowLevelAPI::info
+        static info info0(const std::string &source);
+    };
+    /// 判断目前是否可以安全地call LoaderApi
+    bool checkSafeCall();
 }
-/// MiraiCode.cpp END
-/// ThreadTask.cpp START
+#endif
+/// LowLevelAPI.h END
 
+/// ExceptionHandle.h START
+#ifndef MIRAICP_PRO_EXCEPTIONHANDLE_H
+#define MIRAICP_PRO_EXCEPTIONHANDLE_H
+#include <string>
+namespace MiraiCP {
+    void ErrorHandle0(const std::string &name, int line, const std::string &re, const std::string &ErrorMsg = "");
+}
+#endif
+/// ExceptionHandle.h END
+
+/// commonTypes.h START
+#ifndef MIRAICP_PRO_COMMONTYPES_H
+#define MIRAICP_PRO_COMMONTYPES_H
 /// loaderApiInternal.h START
 #ifndef MIRAICP_PRO_LOADERAPIINTERNAL_H
 #define MIRAICP_PRO_LOADERAPIINTERNAL_H
@@ -742,190 +611,45 @@ namespace LibLoader::LoaderApi {
 #endif
 /// loaderApiInternal.h END
 
-#include <atomic>
-#include <shared_mutex>
-namespace MiraiCP::ThreadTask::internal {
-    using functionType = std::function<void()>;
-    using functionPointerType = std::shared_ptr<functionType>;
-    using storerType = std::unordered_map<size_t, functionPointerType>;
-    using storerIteratorType = storerType::iterator;
-    inline auto &get_function_storer() {
-        static storerType function_storer;
-        return function_storer;
-    }
-    inline auto &get_mutex() {
-        static std::shared_mutex mtx;
-        return mtx;
-    }
-    size_t get_auto_incr_id() {
-        static std::atomic<size_t> id = 0;
-        return id++;
-    }
-    void push_task(size_t id, functionPointerType func) {
-        bool insert;
-        {
-            std::unique_lock lk(get_mutex());
-            insert = get_function_storer().insert({id, std::move(func)}).second;
-        }
-        if (!insert) {
-            Logger::logger.error("Fatal: task id " + std::to_string(id) + " is already taken by another task!");
-            return;
-        }
-        LibLoader::LoaderApi::pushTaskWithId(task_interface, id);
-    }
-    void remove_task(size_t id) {
-        size_t erased;
-        {
-            std::unique_lock lk(get_mutex());
-            erased = get_function_storer().erase(id);
-        }
-        if (0 == erased) {
-            Logger::logger.error("Invalid task id " + std::to_string(id) + " is requested to erase");
-        }
-    }
-    /// @note dev: we can't send a std::function object to libLoader,
-    ///  so one appropriate way is that store the function in a data structure and call it in a wrapper function.
-    void task_interface(size_t id) {
-        static_assert(std::is_same_v<LibLoader::LoaderApi::task_func_with_id, decltype(&task_interface)>);
-        storerIteratorType iter;
-        functionPointerType fPtr;
-        {
-            std::shared_lock lck(get_mutex());
-            iter = get_function_storer().find(id);
-            if (iter == get_function_storer().end()) {
-                Logger::logger.error("Invalid task id " + std::to_string(id) + " is requested to run");
-                return;
-            }
-            fPtr = iter->second;
-        }
-        (*fPtr)();
-    }
-    void raw_push_task(void (*func)()) {
-        LibLoader::LoaderApi::pushTask(func);
-    }
-    void logerror(const std::string &content) {
-        Logger::logger.error(content);
-    }
-}
-/// ThreadTask.cpp END
-/// ForwardedMessage.cpp START
-
-/// API.h START
-#ifndef MIRAICP_PRO_EXCEPTION_API_H
-#define MIRAICP_PRO_EXCEPTION_API_H
-namespace MiraiCP {
-    /// 内部异常, 通常为json读写问题
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT APIException : public MiraiCPExceptionCRTP<APIException> {
-    public:
-        explicit APIException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("MiraiCP内部无法预料的错误:" + text, std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "APIException"; }
-    };
+namespace LibLoader {
+    typedef void *plugin_handle;
+    /// @see @macro FUNC_ENTRANCE
+    typedef int (*plugin_entrance_func_ptr)(const LoaderApi::interface_funcs &);
+    /// @see @macro FUNC_EVENT
+    typedef int (*plugin_event_func_ptr)(const MiraiCP::MiraiCPString &);
+    /// @see @macro FUNC_EXIT
+    typedef int (*plugin_func_ptr)();
+    /// @see @macro PLUGIN_INFO
+    typedef const MiraiCP::PluginConfig *(*plugin_info_func_ptr)();
 }
 #endif
-/// API.h END
+/// commonTypes.h END
 
-#include <json.hpp>
+#include <utility>
+namespace LibLoader::LoaderApi {
+    const interface_funcs *get_loader_apis();
+}
 namespace MiraiCP {
     using json = nlohmann::json;
-    ForwardedNode::ForwardedNode(QQID id, std::string name, ForwardedMessage _message, int t)
-        : id(id), name(std::move(name)),
-          message(MessageChain(std::move(_message))),
-          time(t), isForwardedMessage(true) {}
-    ForwardedNode::ForwardedNode(QQID id, std::string name, MessageChain message, int time)
-        : id(id), name(std::move(name)), message(std::move(message)), time(time), isForwardedMessage(false) {}
-    bool ForwardedMessageDisplayStrategy::operator==(const ForwardedMessageDisplayStrategy &other) const {
-        return this->toJson() == other.toJson();
+    LowLevelAPI::info LowLevelAPI::info0(const std::string &source) {
+        MIRAICP_ERROR_HANDLE(source, "");
+        auto j = nlohmann::json::parse(source);
+        info re{json_stringmover(j, "nickOrNameCard"), json_stringmover(j, "avatarUrl")};
+        return re;
     }
-    nlohmann::json ForwardedMessageDisplayStrategy::toJson() const {
-        nlohmann::json j;
-        j["title"] = title;
-        j["brief"] = brief;
-        j["source"] = source;
-        j["summary"] = summary;
-        j["preview"] = preview;
-        return j;
+    std::string LowLevelAPI::getInfoSource(nlohmann::json c) {
+        nlohmann::json j{{"contact", std::move(c)}};
+        return KtOperation::ktOperation(KtOperation::RefreshInfo, j);
     }
-    ForwardedMessageDisplayStrategy ForwardedMessageDisplayStrategy::fromJson(const json &j) {
-        return {j["title"], j["brief"], j["source"], j["summary"], j["preview"].get<std::vector<std::string>>()};
+    std::string LowLevelAPI::uploadImg0(std::string path, nlohmann::json c) {
+        nlohmann::json j{{"filePath", std::move(path)}, {"contact", c}};
+        return KtOperation::ktOperation(KtOperation::UploadImg, j);
     }
-    ForwardedMessageDisplayStrategy::ForwardedMessageDisplayStrategy(std::string title, std::string brief, std::string source, std::string summary, std::vector<std::string> preview)
-        : title(std::move(title)), brief(std::move(brief)), source(std::move(source)), summary(std::move(summary)), preview(std::move(preview)) {}
-    bool ForwardedMessage::operator==(const ForwardedMessage &m) const {
-        if (this->nodes.size() != m.nodes.size()) return false;
-        int i = 0;
-        if (!(this->display == m.display)) return false;
-        return std::all_of(this->nodes.begin(), this->nodes.end(), [&i, &m](const auto &n) {
-            return n.message == m[i++].message;
-        });
+    bool checkSafeCall() {
+        return LibLoader::LoaderApi::get_loader_apis() != nullptr;
     }
-    json ForwardedMessage::nodesToJson() const {
-        auto value = json::array();
-        for (const ForwardedNode &node: nodes) {
-            json temp{{"senderId", node.id},
-                      {"time", node.time},
-                      {"senderName", node.name},
-                      {"messageChain", node.message.toJson()}};
-            value.emplace_back(std::move(temp));
-        }
-        return value;
-    }
-    MessageSource ForwardedMessage::sendTo(Contact *c) const {
-        auto msg = toJson();
-        msg.update(display.toJson());
-        json req{{"contact", c->toJson()},
-                 {"msg", json::array({msg}).dump()}};
-        std::string re = KtOperation::ktOperation(KtOperation::Buildforward, req);
-        MIRAICP_ERROR_HANDLE(re, "");
-        return MessageSource::deserializeFromString(re);
-    }
-    ForwardedMessage ForwardedMessage::deserializationFromMessageJson(const json &msg) {
-        if (!(msg.contains("type") && msg["type"] == "ForwardMessage") && msg.contains("nodeList"))
-            throw std::invalid_argument("json is not a ForwardMessage");
-        ForwardedMessageDisplayStrategy display;
-        if (msg.contains("title") && msg.contains("brief") && msg.contains("source") && msg.contains("summary") && msg.contains("preview"))
-            display = ForwardedMessageDisplayStrategy::fromJson(msg);
-        else
-            display = ForwardedMessageDisplayStrategy::defaultStrategy();
-        std::vector<ForwardedNode> nodes;
-        auto &j = msg["nodeList"];
-        if (!j.is_array())
-            throw IllegalArgumentException("OnlineForwardedMessage参数异常, 应为 array", MIRAICP_EXCEPTION_WHERE);
-        try {
-            for (auto &&a: j) {
-                if (a["messageChain"][0].contains("kind") && a["messageChain"][0]["kind"] == "FORWARD") {
-                    nodes.emplace_back(a["senderId"], a["senderName"], ForwardedMessage::deserializationFromMessageJson(a["messageChain"][1]["nodeList"]), a["time"]);
-                } else {
-                    nodes.emplace_back(a["senderId"], a["senderName"], MessageChain::deserializationFromMessageJson(a["messageChain"]), a["time"]);
-                }
-            }
-        } catch (const json::parse_error &) {
-            throw APIException("OnlineForwardedMessage格式化异常", MIRAICP_EXCEPTION_WHERE);
-        }
-        return ForwardedMessage(std::move(nodes), display);
-    }
-    nlohmann::json ForwardedMessage::toJson() const {
-        return {{"type", "ForwardMessage"},
-                {"preview", display.preview},
-                {"source", display.source},
-                {"title", display.title},
-                {"brief", display.brief},
-                {"summary", display.summary},
-                {"nodeList", nodesToJson()}};
-    }
-    void ForwardedMessage::add(ForwardedNode a) {
-        this->nodes.emplace_back(std::move(a));
-    }
-    auto &ForwardedMessage::operator+=(ForwardedNode a) {
-        this->add(std::move(a));
-        return *this;
-    }
-    ForwardedMessage::ForwardedMessage(std::initializer_list<ForwardedNode> nodes, ForwardedMessageDisplayStrategy display)
-        : nodes(std::vector(nodes)), display(std::move(display)) {}
-    ForwardedMessage::ForwardedMessage(std::vector<ForwardedNode> inNodes, ForwardedMessageDisplayStrategy display)
-        : nodes(std::move(inNodes)), display(std::move(display)) {}
 }
-/// ForwardedMessage.cpp END
+/// LowLevelAPI.cpp END
 /// Command.cpp START
 
 #include <json.hpp>
@@ -957,144 +681,6 @@ namespace MiraiCP {
     }
 }
 /// Command.cpp END
-/// utils.cpp START
-
-/// commonTypes.h START
-#ifndef MIRAICP_PRO_COMMONTYPES_H
-#define MIRAICP_PRO_COMMONTYPES_H
-namespace LibLoader {
-    typedef void *plugin_handle;
-    /// @see @macro FUNC_ENTRANCE
-    typedef int (*plugin_entrance_func_ptr)(const LoaderApi::interface_funcs &);
-    /// @see @macro FUNC_EVENT
-    typedef int (*plugin_event_func_ptr)(const MiraiCP::MiraiCPString &);
-    /// @see @macro FUNC_EXIT
-    typedef int (*plugin_func_ptr)();
-    /// @see @macro PLUGIN_INFO
-    typedef const MiraiCP::PluginConfig *(*plugin_info_func_ptr)();
-}
-#endif
-/// commonTypes.h END
-
-#include <iostream>
-using json = nlohmann::json;
-namespace LibLoader::LoaderApi {
-    const interface_funcs *get_loader_apis();
-    MIRAICP_EXPORT void set_loader_apis(const LibLoader::LoaderApi::interface_funcs *apis) noexcept;
-    MIRAICP_EXPORT void reset_loader_apis() noexcept;
-}
-/// 安全检查
-extern "C" {
-MIRAICP_EXPORT void _unused_MiraiCP_internal_safety_check() {
-    MiraiCP::enrollPlugin();
-}
-}
-extern "C" {
-/// 插件开启入口
-MIRAICP_EXPORT int FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
-    static_assert(std::is_same_v<decltype(&FUNC_ENTRANCE), LibLoader::plugin_entrance_func_ptr>);
-    using namespace MiraiCP;
-    Event::clear();
-    LibLoader::LoaderApi::set_loader_apis(&funcs);
-    assert(LibLoader::LoaderApi::get_loader_apis() != nullptr);
-    try {
-        Logger::logger.info("开始启动插件: " + MiraiCP::CPPPlugin::config.getId());
-        enrollPlugin();
-        if (CPPPlugin::plugin != nullptr) {
-            CPPPlugin::plugin->onEnable();
-        }
-    } catch (const MiraiCPExceptionBase &e) {
-        try {
-            std::cerr.flush();
-            e.raise();
-            Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
-        } catch (...) {}
-        return PLUGIN_ERROR;
-    } catch (const std::exception &e) {
-        try {
-            std::cerr.flush();
-            Logger::logger.error(e.what());
-            Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
-        } catch (...) {}
-        return PLUGIN_ERROR;
-    } catch (...) {
-        try {
-            std::cerr.flush();
-            Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
-        } catch (...) {}
-        return PLUGIN_ERROR;
-    }
-    return PLUGIN_NORMAL;
-}
-/// 插件结束(也可能是暂时的disable)
-MIRAICP_EXPORT int FUNC_EXIT() {
-    static_assert(std::is_same_v<decltype(&FUNC_EXIT), LibLoader::plugin_func_ptr>);
-    using namespace MiraiCP;
-    if (LibLoader::LoaderApi::get_loader_apis() == nullptr) return PLUGIN_NORMAL;
-    MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.info("开始禁用插件：" + MiraiCP::CPPPlugin::config.getId());)
-    Event::clear();
-    MIRAICP_CRITICAL_NOEXCEPT_BLOCK(if (CPPPlugin::plugin != nullptr) CPPPlugin::plugin->onDisable();)
-    CPPPlugin::plugin.reset();
-    LibLoader::LoaderApi::reset_loader_apis();
-    return PLUGIN_NORMAL;
-}
-/// 消息解析分流
-/// env != null, call from jni
-/// 除了致命问题，该函数不会返回 ERROR
-MIRAICP_EXPORT int FUNC_EVENT(const MiraiCP::MiraiCPString &c) {
-    static_assert(std::is_same_v<decltype(&FUNC_EVENT), LibLoader::plugin_event_func_ptr>);
-    using namespace MiraiCP;
-    std::string content = c;
-    json j;
-    try {
-        j = json::parse(content);
-    } catch (json::parse_error &e) {
-        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("消息解析分流：格式化json错误");
-                                        Logger::logger.error("For debug: " + content);
-                                        Logger::logger.error(e.what());)
-        return PLUGIN_NORMAL;
-    }
-    int type;
-    try {
-        if (!j.is_object() || !j.contains("eventId") || !j["eventId"].is_number()) {
-            MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("Json格式错误：没有eventId这一field或这一field不是数字类型");)
-            return PLUGIN_NORMAL;
-        }
-        type = j["eventId"].get<int>();
-        if (type != eventTypes::Command && Event::noRegistered(type)) return PLUGIN_NORMAL;
-    } catch (...) {
-        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("Json格式错误：解析json时遇到无法预料的异常");)
-        return PLUGIN_NORMAL;
-    }
-    try {
-        Event::incomingEvent(BaseEventData(std::move(j)), type);
-    } catch (json::type_error &e) {
-        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("json格式化异常,位置：FUNC_EVENT");
-                                        Logger::logger.error(e.what());
-                                        Logger::logger.error(content);)
-        return PLUGIN_NORMAL;
-    } catch (MiraiCPExceptionBase &e) {
-        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Event::broadcast<MiraiCPExceptionEvent>(MiraiCPExceptionEvent(&e));
-                                        e.raise();)
-        return PLUGIN_NORMAL;
-    } catch (const std::exception &e) {
-        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error(e.what());
-                                        Logger::logger.error("info:", content);)
-        return PLUGIN_NORMAL;
-    } catch (...) {
-        return PLUGIN_ERROR;
-    }
-    return PLUGIN_NORMAL;
-}
-/// 获取 Plugin Info
-/// 如果未正确定义，插件无法正确加载
-/// dev: 该函数不可调用loader api；因为会在入口函数调用前先调用，loader api未初始化
-MIRAICP_EXPORT const MiraiCP::PluginConfig *PLUGIN_INFO() {
-    static_assert(std::is_same_v<decltype(&PLUGIN_INFO), LibLoader::plugin_info_func_ptr>);
-    return &MiraiCP::CPPPlugin::config;
-}
-}
-/// utils.cpp END
 /// Tools.cpp START
 
 #include <regex>
@@ -1166,82 +752,108 @@ namespace MiraiCP::Tools {
     }
 }
 /// Tools.cpp END
-/// MessageSource.cpp START
-
-#include <json.hpp>
-namespace MiraiCP {
-    using json = nlohmann::json;
-    /// 撤回异常
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT RecallException : public MiraiCPExceptionCRTP<RecallException> {
-    public:
-        RecallException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("该消息已经被撤回", std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "RecallException"; }
-    };
-    void MessageSource::recall() const {
-        std::string re = KtOperation::ktOperationStr(KtOperation::Recall, serializeToString());
-        if (re == "E2") throw RecallException(MIRAICP_EXCEPTION_WHERE);
-    }
-    MessageSource::MessageSource(std::string ids,
-                                 std::string internalids,
-                                 std::string source)
-        : ids(std::move(ids)),
-          internalids(std::move(internalids)),
-          source(std::move(source)) {}
-    std::string MessageSource::serializeToString() const {
-        return source;
-    }
-    MessageSource MessageSource::deserializeFromString(const std::string &source) {
-        json j = json::parse(source);
-        try {
-            return {j["ids"].dump(), j["internalIds"].dump(), source};
-        } catch (json::type_error &e) {
-            Logger::logger.error("消息源序列化出错，格式不符合(MessageSource::deserializeFromString)");
-            Logger::logger.error(source);
-            Logger::logger.error(e.what());
-            throw IllegalArgumentException(std::string("消息源序列化出错，格式不符合(MessageSource::deserializeFromString), ") + e.what(), MIRAICP_EXCEPTION_WHERE);
-        }
-    }
-    bool MessageSource::operator==(const MessageSource &ms) const {
-        return this->ids == ms.ids && this->internalids == ms.internalids;
-    }
-}
-/// MessageSource.cpp END
 /// Bot.cpp START
 
-/// LowLevelAPI.h START
-#ifndef MIRAICP_PRO_LOWLEVELAPI_H
-#define MIRAICP_PRO_LOWLEVELAPI_H
-#include "nlohmann/json_fwd.hpp"
+/// IContactData.h START
+#ifndef MIRAICP_PRO_ICONTACTDATA_H
+#define MIRAICP_PRO_ICONTACTDATA_H
+/// IMiraiData.h START
+#ifndef MIRAICP_PRO_IMIRAIDATA_H
+#define MIRAICP_PRO_IMIRAIDATA_H
+#include "json_fwd.hpp"
+#include <atomic>
+#include <shared_mutex>
 namespace MiraiCP {
-    /// 较底层api
-    class LowLevelAPI {
-    public:
-        /// @brief 取该联系人的一些信息
-        /// @param c 该联系人Contact->serializationToString()
-        /// @return json格式字符串，待解析
-        static std::string getInfoSource(nlohmann::json c);
-        /*!
-         * @brief 上传图片
-         * @param path 本地地址
-         * @param c 上传的对象, Contact->serializationToString()
-         * @return string 待解析json
-         */
-        static std::string uploadImg0(std::string, nlohmann::json);
-        /// 每个对象的必有信息
-        struct info {
-            std::string nickOrNameCard;
-            std::string avatarUrl;
+    /// 声明 Contact 类数据安全锁接口以及部分实现的抽象类
+    struct IMiraiData {
+    private:
+        /// 锁
+        struct MiraiDataLocker final {
+            /// 该数据是否上锁
+            std::shared_mutex _mtx;
+            /// 该数据是否已经初始化
+            std::atomic<bool> _inited = false;
         };
-        /// 获取每个对象必有信息
-        /// @see LowLevelAPI::info
-        static info info0(const std::string &source);
+    protected:
+        /// 锁实例
+        mutable MiraiDataLocker Locker;
+    public:
+        IMiraiData() = default;
+        virtual ~IMiraiData() = default;
+    public:
+        /// 转为json, 由子类实现, 多线程安全(带锁)
+        nlohmann::json toJson() const;
+    protected:
+        /// 读入json数据, 由子类实现, 无锁
+        virtual void deserialize(nlohmann::json in_json) = 0;
+        /// 转为json, 由子类实现, 无锁
+        virtual nlohmann::json internalToJson() const = 0;
+        /**
+         * 转为json，internalToJson 的具体实现决定, 无锁
+         * @see internalToJson
+         */
+        nlohmann::json internalToString() const;
+    public:
+        /// 请求一次刷新数据, 但不保证会进行
+        void requestRefresh();
+        /*!
+         * @brief 确保下次调用 requestRefresh 时刷新数据
+         * @note 调用该函数本身不会刷新数据
+         * @see requestRefresh
+         */
+        void forceRefreshNextTime();
+        /// 序列化为string, 带锁
+        std::string toString() const;
+        /// 获取锁
+        std::shared_mutex &getMutex() {
+            return Locker._mtx;
+        }
+    private:
+        /// 刷新数据, 由子类实现
+        virtual void refreshInfo() = 0;
     };
-    /// 判断目前是否可以安全地call LoaderApi
-    bool checkSafeCall();
 }
 #endif
-/// LowLevelAPI.h END
+/// IMiraiData.h END
+
+namespace MiraiCP {
+    /// Contact 内部储存数据抽象类
+    struct IContactData : public IMiraiData {
+        /// 昵称或者群名片
+        std::string _nickOrNameCard;
+        /// 头像 url
+        std::string _avatarUrl;
+        /// id
+        QQID _id{};
+        /// 所属的 bot 的 id
+        QQID _botId{};
+        /// Contact 类型
+        ContactType _type = MIRAI_CONTACT;
+        void deserialize(nlohmann::json inJson) override;
+        nlohmann::json internalToJson() const override;
+        /// 刷新数据
+        void refreshInfo() override;
+        /**
+         * 更新传入 json 中的数据, 在调用后, 原 json 数据会被更新
+         * @param jsonToUpdate 需更新的 json 数据
+         * @see nlohmann::update
+         */
+        void updateJson(nlohmann::json &jsonToUpdate) const;
+    };
+    /**
+     * @brief 获取指向的数据的裸指针，实际取内容时必须通过该函数，否则可能会取不到。
+     * @note dev: 为了让getter正常地拥有const语义, 该函数不可以由外部调用.
+     *  该函数使用const qualifier, 但返回非const的指针类型. 若允许外部调用可能造成数据问题。
+     * @see IMPL_GETTER
+     */
+    template<typename DataType>
+    DataType *GetDataInternal(std::shared_ptr<IContactData> &Data) {
+        assert(Data != nullptr);
+        return static_cast<DataType *>(Data.get());
+    }
+}
+#endif
+/// IContactData.h END
 
 #include <atomic>
 #include <memory>
@@ -1308,236 +920,6 @@ namespace MiraiCP {
     }
 }
 /// Bot.cpp END
-/// LowLevelAPI.cpp START
-
-#include <utility>
-namespace LibLoader::LoaderApi {
-    const interface_funcs *get_loader_apis();
-}
-namespace MiraiCP {
-    using json = nlohmann::json;
-    LowLevelAPI::info LowLevelAPI::info0(const std::string &source) {
-        MIRAICP_ERROR_HANDLE(source, "");
-        auto j = nlohmann::json::parse(source);
-        info re{json_stringmover(j, "nickOrNameCard"), json_stringmover(j, "avatarUrl")};
-        return re;
-    }
-    std::string LowLevelAPI::getInfoSource(nlohmann::json c) {
-        nlohmann::json j{{"contact", std::move(c)}};
-        return KtOperation::ktOperation(KtOperation::RefreshInfo, j);
-    }
-    std::string LowLevelAPI::uploadImg0(std::string path, nlohmann::json c) {
-        nlohmann::json j{{"filePath", std::move(path)}, {"contact", c}};
-        return KtOperation::ktOperation(KtOperation::UploadImg, j);
-    }
-    bool checkSafeCall() {
-        return LibLoader::LoaderApi::get_loader_apis() != nullptr;
-    }
-}
-/// LowLevelAPI.cpp END
-/// Contact.cpp START
-
-/// GroupRelatedData.h START
-#ifndef MIRAICP_PRO_GROUPRELATEDDATA_H
-#define MIRAICP_PRO_GROUPRELATEDDATA_H
-namespace MiraiCP {
-    struct GroupRelatedData : public IContactData {
-        typedef IContactData Super;
-        /// group id
-        QQID _groupId;
-        nlohmann::json internalToJson() const override;
-        explicit GroupRelatedData(QQID in_groupid) : _groupId(in_groupid) {}
-    };
-}
-#endif
-/// GroupRelatedData.h END
-
-/// Upload.h START
-#ifndef MIRAICP_PRO_EXCEPTION_UPLOAD_H
-#define MIRAICP_PRO_EXCEPTION_UPLOAD_H
-namespace MiraiCP {
-    /// 文件读取异常.
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT UploadException : public MiraiCPExceptionCRTP<UploadException> {
-    public:
-        explicit UploadException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("上传(图片/文件)异常" + text, std::move(_filename), _lineNum) {}
-        static std::string exceptionType() { return "UploadException"; }
-    };
-}
-#endif
-/// Upload.h END
-
-namespace MiraiCP {
-    using json = nlohmann::json;
-    std::shared_ptr<Contact> Contact::deserializeToPointer(nlohmann::json j) {
-        uint8_t thistype = j["type"];
-        switch (thistype) {
-            case MIRAI_FRIEND: {
-                return std::make_shared<Friend>(std::move(j));
-            }
-            case MIRAI_MEMBER: {
-                return std::make_shared<Member>(std::move(j));
-            }
-            case MIRAI_GROUP: {
-                return std::make_shared<Group>(std::move(j));
-            }
-            default:
-                assert(0);
-                break;
-        }
-        return {};
-    }
-    MessageSource Contact::sendVoiceImpl(std::string path) const {
-        json j{{"path", std::move(path)},
-               {"contact", toJson()}};
-        std::string re = KtOperation::ktOperation(KtOperation::Voice, j);
-        if (re == "E1") {
-            throw UploadException("上传语音文件格式不对(必须为.amr/.silk)或文件不存在", MIRAICP_EXCEPTION_WHERE);
-        } else if (re == "E2") {
-            throw UploadException("上传语音文件大小超过服务器限制，一般限制在1MB上下", MIRAICP_EXCEPTION_WHERE);
-        }
-        return MessageSource::deserializeFromString(re);
-    }
-    void IContactData::deserialize(nlohmann::json in_json) {
-        _nickOrNameCard = json_stringmover(in_json, "nickOrNameCard");
-        _avatarUrl = json_stringmover(in_json, "avatarUrl");
-    }
-    void IContactData::refreshInfo() {
-        std::string temp = LowLevelAPI::getInfoSource(internalToJson());
-        MIRAICP_ERROR_HANDLE(temp, "");
-        LowLevelAPI::info tmp = LowLevelAPI::info0(temp);
-        this->_nickOrNameCard = tmp.nickOrNameCard;
-        this->_avatarUrl = tmp.avatarUrl;
-    }
-    nlohmann::json IContactData::internalToJson() const {
-        return {{"id", _id}, {"botId", _botId}, {"type", _type}};
-    }
-    void IContactData::updateJson(json &json_to_update) const {
-        json_to_update.update(toJson(), true);
-    }
-    nlohmann::json GroupRelatedData::internalToJson() const {
-        auto result = IContactData::internalToJson();
-        result["groupId"] = _groupId;
-        return result;
-    }
-    MessageSource Contact::quoteAndSendImpl(std::string msg, const MessageSource &ms) const {
-        json obj{{"messageSource", ms.serializeToString()},
-                 {"msg", std::move(msg)},
-                 {"contact", toJson()}};
-        std::string re = KtOperation::ktOperation(KtOperation::SendWithQuote, obj);
-        return MessageSource::deserializeFromString(re);
-    }
-    Image Contact::uploadImg(const std::string &path) const {
-        std::string re = LowLevelAPI::uploadImg0(path, toJson());
-        if (re == "E2")
-            throw UploadException("上传图片大小超过30MB,路径:" + path, MIRAICP_EXCEPTION_WHERE);
-        return Image::deserialize(re);
-    }
-    FlashImage Contact::uploadFlashImg(const std::string &path) const {
-        std::string re = LowLevelAPI::uploadImg0(path, toJson());
-        if (re == "E2")
-            throw UploadException("上传图片大小超过30MB,路径:" + path, MIRAICP_EXCEPTION_WHERE);
-        return FlashImage::deserialize(re);
-    }
-    MessageSource Contact::sendMsgImpl(std::string msg) const {
-        if (msg.empty()) {
-            throw IllegalArgumentException("不能发送空信息, 位置: Contact::SendMsg", MIRAICP_EXCEPTION_WHERE);
-        }
-        nlohmann::json j{{"message", std::move(msg)}, {"contact", toJson()}};
-        auto re = KtOperation::ktOperation(KtOperation::Send, j, true, "reach a error area, Contact::sendMsgImpl");
-        return MessageSource::deserializeFromString(re);
-    }
-    void Contact::SetInternalData(std::shared_ptr<IContactData> Data) { InternalData = std::move(Data); }
-    Contact::Contact(std::shared_ptr<IContactData> Data) {
-        SetInternalData(std::move(Data));
-    }
-    ContactType Contact::type() const { return InternalData->_type; }
-    QQID Contact::id() const { return InternalData->_id; }
-    QQID Contact::botid() const { return InternalData->_botId; }
-    nlohmann::json Contact::toJson() const { return InternalData->toJson(); }
-    void Contact::updateJson(json &j) const { InternalData->updateJson(j); }
-    std::string Contact::toString() const { return toJson().dump(); }
-    void Contact::refreshInfo() {
-        InternalData->requestRefresh();
-    }
-    void Contact::forceRefreshNextTime() {
-        InternalData->forceRefreshNextTime();
-    }
-    void Contact::forceRefreshNow() {
-        forceRefreshNextTime();
-        refreshInfo();
-    }
-    bool Contact::operator==(const Contact &c) const {
-        return id() == c.id() && InternalData->_type == c.InternalData->_type;
-    }
-    MessageSource Contact::unpackMsg(const MessageChain &msg) const {
-        return sendMsgImpl(msg.toString());
-    }
-    MessageSource Contact::unpackMsg(const MiraiCodeable &msg) const {
-        return sendMsgImpl(MessageChain::deserializationFromMiraiCode(msg.toMiraiCode()).toString());
-    }
-    MessageSource Contact::unpackMsg(std::string msg) const {
-        return sendMsgImpl(MessageChain(PlainText(std::move(msg))).toString());
-    }
-    MessageSource Contact::unpackQuote(const SingleMessage &s, const MessageSource &ms) const {
-        return quoteAndSendImpl(MessageChain(s).toString(), ms);
-    }
-    MessageSource Contact::unpackQuote(const std::string &s, const MessageSource &ms) const {
-        return quoteAndSendImpl(s, ms);
-    }
-    MessageSource Contact::unpackQuote(const MessageChain &mc, const MessageSource &ms) const {
-        return quoteAndSendImpl(mc.toString(), ms);
-    }
-    std::string internal::getNickFromIContactPtr(IContactData *p) {
-        p->requestRefresh();
-        std::shared_lock<std::shared_mutex> local_lck(p->getMutex());
-        return p->_nickOrNameCard;
-    }
-    std::string internal::getAvatarUrlFromIContactPtr(IContactData *p) {
-        p->requestRefresh();
-        std::shared_lock<std::shared_mutex> local_lck(p->getMutex());
-        return p->_avatarUrl;
-    }
-}
-/// Contact.cpp END
-/// MiraiCPNewThread.cpp START
-
-#include <ostream>
-namespace MiraiCP {
-    /// 如果在 MiraiCPNewThread 中捕获到了非 MiraiCP 之外的异常抛出
-    /// @see MiraiCPNewThread
-    class MiraiCPThreadException : public MiraiCPExceptionCRTP<MiraiCPThreadException> {
-    public:
-        /// 抛出异常的线程 ID
-        std::thread::id threadId;
-    public:
-        explicit MiraiCPThreadException(const std::string &exception_content, std::thread::id threadId, string _filename, int _lineNum)
-            : MiraiCPExceptionCRTP(exception_content + " at threadId: " + getThreadIdStr(threadId), std::move(_filename), _lineNum),
-              threadId(threadId) {}
-    public:
-        std::string getThreadIdStr() const { return getThreadIdStr(threadId); }
-    public:
-        static string exceptionType() { return "MiraiCPThreadException"; }
-    private:
-        MIRAICP_EXPORT static std::string getThreadIdStr(const std::thread::id &id) {
-            static std::stringstream ss;
-            ss << id;
-            auto result = ss.str();
-            ss.str("");
-            return result;
-        }
-    };
-    void MiraiCPNewThread::threadThrows(const std::string &content) {
-        MiraiCPThreadException exNew(content, std::this_thread::get_id(), MIRAICP_EXCEPTION_WHERE);
-        exNew.raise();
-        Event::broadcast(MiraiCPExceptionEvent(&exNew));
-    }
-    void MiraiCPNewThread::threadExceptionBroadcast(MiraiCPExceptionBase &e) {
-        e.raise();
-        Event::broadcast(MiraiCPExceptionEvent(&e));
-    }
-}
-/// MiraiCPNewThread.cpp END
 /// loaderApi.cpp START
 
 #include <json.hpp>
@@ -1669,403 +1051,91 @@ namespace MiraiCP::LoaderApi {
     }
 }
 /// loaderApi.cpp END
-/// Event.cpp START
+/// ThreadTask.cpp START
 
-/// TimeOut.h START
-#ifndef MIRAICP_PRO_EXCEPTION_TIMEOUT_H
-#define MIRAICP_PRO_EXCEPTION_TIMEOUT_H
+#include <atomic>
+#include <shared_mutex>
+#include <unordered_map>
+namespace MiraiCP::ThreadTask::internal {
+    using functionType = std::function<void()>;
+    using functionPointerType = std::shared_ptr<functionType>;
+    using storerType = std::unordered_map<size_t, functionPointerType>;
+    using storerIteratorType = storerType::iterator;
+    inline auto &get_function_storer() {
+        static storerType function_storer;
+        return function_storer;
+    }
+    inline auto &get_mutex() {
+        static std::shared_mutex mtx;
+        return mtx;
+    }
+    size_t get_auto_incr_id() {
+        static std::atomic<size_t> id = 0;
+        return id++;
+    }
+    void push_task(size_t id, functionPointerType func) {
+        bool insert;
+        {
+            std::unique_lock lk(get_mutex());
+            insert = get_function_storer().insert({id, std::move(func)}).second;
+        }
+        if (!insert) {
+            Logger::logger.error("Fatal: task id " + std::to_string(id) + " is already taken by another task!");
+            return;
+        }
+        LibLoader::LoaderApi::pushTaskWithId(task_interface, id);
+    }
+    void remove_task(size_t id) {
+        size_t erased;
+        {
+            std::unique_lock lk(get_mutex());
+            erased = get_function_storer().erase(id);
+        }
+        if (0 == erased) {
+            Logger::logger.error("Invalid task id " + std::to_string(id) + " is requested to erase");
+        }
+    }
+    /// @note dev: we can't send a std::function object to libLoader,
+    ///  so one appropriate way is that store the function in a data structure and call it in a wrapper function.
+    void task_interface(size_t id) {
+        static_assert(std::is_same_v<LibLoader::LoaderApi::task_func_with_id, decltype(&task_interface)>);
+        storerIteratorType iter;
+        functionPointerType fPtr;
+        {
+            std::shared_lock lck(get_mutex());
+            iter = get_function_storer().find(id);
+            if (iter == get_function_storer().end()) {
+                Logger::logger.error("Invalid task id " + std::to_string(id) + " is requested to run");
+                return;
+            }
+            fPtr = iter->second;
+        }
+        (*fPtr)();
+    }
+    void raw_push_task(void (*func)()) {
+        LibLoader::LoaderApi::pushTask(func);
+    }
+    void logerror(const std::string &content) {
+        Logger::logger.error(content);
+    }
+}
+/// ThreadTask.cpp END
+/// Exception.cpp START
+
+/// API.h START
+#ifndef MIRAICP_PRO_EXCEPTION_API_H
+#define MIRAICP_PRO_EXCEPTION_API_H
 namespace MiraiCP {
-    /// 超时
+    /// 内部异常, 通常为json读写问题
     /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT TimeOutException : public MiraiCPExceptionCRTP<TimeOutException> {
+    class MIRAICP_EXPORT APIException : public MiraiCPExceptionCRTP<APIException> {
     public:
-        explicit TimeOutException(const std::string &e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(e, std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "TimeOutException"; }
+        explicit APIException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("MiraiCP内部无法预料的错误:" + text, std::move(_filename), _lineNum) {}
+        static string exceptionType() { return "APIException"; }
     };
 }
 #endif
-/// TimeOut.h END
-
-#include <atomic>
-namespace MiraiCP {
-    namespace CommandManager {
-        extern std::vector<std::unique_ptr<IRawCommand>> commandList;
-    };
-    using json = nlohmann::json;
-    Event Event::processor;
-    GroupMessageEvent::GroupMessageEvent(BaseEventData j) : BotEvent(j.botId),
-                                                            group(j.subject->id, j.botId),
-                                                            sender(j.object->id, j.object->groupId, j.botId),
-                                                            message(MessageChain::deserializationFromMessageJson(
-                                                                            json::parse(j.eventData["message"].get<std::string>()))
-                                                                            .plus(MessageSource::deserializeFromString(
-                                                                                    j.eventData["source"].get<std::string>()))) {
-    }
-    MessageChain GroupMessageEvent::nextMessage(long time, bool halt) const {
-        json j{{"contact", this->group.toJson()},
-               {"time", time},
-               {"halt", halt}};
-        std::string r = KtOperation::ktOperation(KtOperation::NextMsg, j);
-        if (r == "E1")
-            throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
-        json re = json::parse(r);
-        return MessageChain::deserializationFromMessageJson(nlohmann::json::parse(json_stringmover(re, "message"))).plus(MessageSource::deserializeFromString(re["messageSource"]));
-    }
-    MessageChain GroupMessageEvent::senderNextMessage(long time, bool halt) const {
-        json j{{"contact", this->sender.toJson()},
-               {"time", time},
-               {"halt", halt}};
-        std::string r = KtOperation::ktOperation(KtOperation::NextMsg, j);
-        if (r == "E1")
-            throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
-        json re = json::parse(r);
-        return MessageChain::deserializationFromMessageJson(
-                       json::parse(re["message"].get<std::string>()))
-                .plus(
-                        MessageSource::deserializeFromString(re["messageSource"]));
-    }
-    PrivateMessageEvent::PrivateMessageEvent(BaseEventData j) : BotEvent(j.botId),
-                                                                sender(j.subject->id, j.subject->botId),
-                                                                message(MessageChain::deserializationFromMessageJson(
-                                                                                json::parse(j.eventData["message"].get<std::string>()))
-                                                                                .plus(MessageSource::deserializeFromString(
-                                                                                        j.eventData["source"].get<std::string>()))) {
-    }
-    MessageChain PrivateMessageEvent::nextMessage(long time, bool halt) const {
-        json j{{"contact", this->sender.toJson()},
-               {"time", time},
-               {"halt", halt}};
-        std::string r = KtOperation::ktOperation(KtOperation::NextMsg, j);
-        if (r == "E1")
-            throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
-        json re = json::parse(r);
-        return MessageChain::deserializationFromMessageJson(json::parse(re["message"].get<std::string>()))
-                .plus(MessageSource::deserializeFromString(re["messageSource"]));
-    }
-    GroupInviteEvent::GroupInviteEvent(BaseEventData j) : BotEvent(j.botId),
-                                                          source(json_stringmover(j.eventData, "request")),
-                                                          inviterNick(
-                                                                  json_stringmover(j.eventData, "invitorNick")),
-                                                          groupName(json_stringmover(j.eventData, "groupName")),
-                                                          group(j.subject->id, j.subject->botId),
-                                                          inviter(j.object->id, j.object->botId),
-                                                          requestEventId(j.eventData["requestEventId"]) {
-    }
-    void groupInviteInternal(const std::string &source, QQID botid, bool accept) {
-        nlohmann::json j{{"source", source},
-                         {"sign", accept},
-                         {"botId", botid}};
-        std::string re = KtOperation::ktOperation(KtOperation::Gioperation, j);
-        if (re == "E") Logger::logger.error("群聊邀请事件同意失败(可能因为重复处理),id:" + source);
-    }
-    void GroupInviteEvent::reject() {
-        groupInviteInternal(source, bot.id(), false);
-    }
-    void GroupInviteEvent::accept() {
-        groupInviteInternal(source, bot.id(), true);
-    }
-    NewFriendRequestEvent::NewFriendRequestEvent(BaseEventData j) : BotEvent(j.botId),
-                                                                    source(json_stringmover(j.eventData, "request")),
-                                                                    from(j.object->id, j.object->botId),
-                                                                    fromGroup(j.subject == std::nullopt ? std::nullopt : std::optional(Group(j.subject->id, j.subject->botId))),
-                                                                    nick(json_stringmover(j.eventData, "requesterNick")),
-                                                                    message(json_stringmover(j.eventData, "message")),
-                                                                    requestEventId(j.eventData["requestEventId"]) {
-    }
-    void newFriendRequestInternal(const std::string &source, QQID botId, bool accept, bool ban = false) {
-        nlohmann::json j{{"source", source},
-                         {"sign", accept},
-                         {"botId", botId},
-                         {"ban", ban}};
-        std::string re = KtOperation::ktOperation(KtOperation::Nfroperation, j);
-        if (re == "E") Logger::logger.error("好友申请事件同意失败(可能因为重复处理),id:" + source);
-    }
-    void NewFriendRequestEvent::reject(bool ban) {
-        newFriendRequestInternal(source, bot.id(), false, ban);
-    }
-    void NewFriendRequestEvent::accept() {
-        newFriendRequestInternal(source, bot.id(), true);
-    }
-    MemberJoinEvent::MemberJoinEvent(BaseEventData j) : BotEvent(j.botId),
-                                                        type(joinType(j.eventData["eventType"].get<int>())),
-                                                        member(j.object->id, j.subject->groupId, j.botId),
-                                                        group(j.subject->id, j.subject->botId),
-                                                        inviter(j.object == std::nullopt ? std::nullopt : std::optional(Member(j.object->id, j.object->groupId, j.object->botId))) {
-    }
-    MemberLeaveEvent::MemberLeaveEvent(BaseEventData j) : BotEvent(j.botId),
-                                                          member(j.object->id, j.object->groupId, j.object->botId),
-                                                          group(j.subject->id, j.subject->botId),
-                                                          operater(!j.eventData.contains("operator") ? std::nullopt : std::optional(Member(j.eventData["operator"]["id"], j.eventData["operator"]["groupId"], j.eventData["operator"]["botId"]))),
-                                                          type(j.eventData["eventType"]) {
-    }
-    FriendRecallEvent::FriendRecallEvent(BaseEventData j) : BotEvent(j.botId),
-                                                            time(j.eventData["messageTime"]),
-                                                            author(j.eventData["author"]["id"], j.eventData["author"]["botId"]),
-                                                            operater(j.object->id, j.object->botId),
-                                                            ids(j.eventData["messageIds"].dump()),
-                                                            internalIds(j.eventData["messageInternalIds"].dump()) {
-    }
-    MemberRecallEvent::MemberRecallEvent(BaseEventData j) : BotEvent(j.subject->botId),
-                                                            time(j.eventData["messageTime"]),
-                                                            author(j.eventData["author"]["id"], j.eventData["author"]["groupId"], j.eventData["author"]["botId"]),
-                                                            operater(j.object->id, j.object->groupId, j.object->botId),
-                                                            ids(j.eventData["messageIds"].dump()),
-                                                            internalIds(j.eventData["messageInternalIds"].dump()) {
-    }
-    BotJoinGroupEvent::BotJoinGroupEvent(BaseEventData j) : BotEvent(j.botId),
-                                                            group(j.subject->id, j.subject->botId),
-                                                            inviter(j.eventData.contains("inviter") ? std::optional(
-                                                                                                              Member(j.eventData["inviter"]["id"],
-                                                                                                                     j.eventData["inviter"]["groupId"],
-                                                                                                                     j.eventData["inviter"]["botId"]))
-                                                                                                    : std::nullopt),
-                                                            type(j.eventData["eventType"]) {
-    }
-    GroupTempMessageEvent::GroupTempMessageEvent(BaseEventData j) : BotEvent(j.botId),
-                                                                    group(j.subject->id, j.subject->botId),
-                                                                    sender(j.object->id, j.object->groupId, j.object->botId),
-                                                                    message(MessageChain::deserializationFromMessageJson(
-                                                                                    json::parse(j.eventData["message"].get<std::string>()))
-                                                                                    .plus(MessageSource::deserializeFromString(
-                                                                                            j.eventData["source"]))) {
-    }
-    NudgeEvent::NudgeEvent(BaseEventData j) : BotEvent(j.botId),
-                                              from(j.object->toContactPointer()),
-                                              target(BaseEventData::BuiltInContact(
-                                                             j.eventData["target"])
-                                                             .toContactPointer()),
-                                              subject(j.subject->toContactPointer()) {
-    }
-    BotLeaveEvent::BotLeaveEvent(BaseEventData j) : BotEvent(j.botId),
-                                                    group(j.subject->id, j.subject->botId),
-                                                    type(j.eventData["eventType"]),
-                                                    operater(j.object->id, j.object->groupId, j.object->botId) {
-    }
-    MemberJoinRequestEvent::MemberJoinRequestEvent(BaseEventData j) : BotEvent(j.botId),
-                                                                      source(json_jsonmover(j.eventData,
-                                                                                            "requestData")),
-                                                                      group(j.subject->id, j.subject->botId),
-                                                                      inviter(j.eventData.contains("inviter")
-                                                                                      ? std::optional(
-                                                                                                Member(json_jsonmover(
-                                                                                                        j.eventData, "inviter")))
-                                                                                      : std::nullopt),
-                                                                      from(j.object->id, j.object->groupId,
-                                                                           j.object->botId),
-                                                                      fromNick(json_jsonmover(j.eventData,
-                                                                                              "fromNick")),
-                                                                      message(json_jsonmover(j.eventData,
-                                                                                             "message")) {
-    }
-    /**
-     * @brief 底层通过MemberJoinRequest
-     * @param s 序列化后的文本
-     */
-    void memberJoinRequestInternal(std::string_view s, QQID botid, bool sign, std::string msg = "") {
-        nlohmann::json j{{"source", s},
-                         {"botId", botid},
-                         {"sign", sign},
-                         {"msg", std::move(msg)}};
-        KtOperation::ktOperation(KtOperation::MemberJoinRequest, j);
-    }
-    void MemberJoinRequestEvent::accept() {
-        memberJoinRequestInternal(source, bot.id(), true);
-    }
-    void MemberJoinRequestEvent::reject(std::string msg) {
-        memberJoinRequestInternal(source, bot.id(), false, std::move(msg));
-    }
-    MessagePreSendEvent::MessagePreSendEvent(BaseEventData j) : BotEvent(j.botId),
-                                                                target(j.subject->toContactPointer()),
-                                                                message(MessageChain::deserializationFromMessageJson(
-                                                                        nlohmann::json::parse(
-                                                                                json_stringmover(j.eventData, "message")))) {
-    }
-    void Event::incomingEvent(BaseEventData j, int type) {
-        switch (type) {
-            case eventTypes::GroupMessageEvent: {
-                Event::broadcast(GroupMessageEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::FriendMessageEvent: {
-                Event::broadcast(PrivateMessageEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::GroupTempMessageEvent: {
-                Event::broadcast(GroupTempMessageEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::GroupInviteEvent: {
-                Event::broadcast(GroupInviteEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::NewFriendRequestEvent: {
-                Event::broadcast(NewFriendRequestEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::MemberJoinEvent: {
-                Event::broadcast(MemberJoinEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::MemberLeaveEvent: {
-                Event::broadcast(MemberLeaveEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::FriendRecallEvent: {
-                Event::broadcast(RecallEvent::FriendRecallEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::MemberRecallEvent: {
-                Event::broadcast(RecallEvent::MemberRecallEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::BotJoinGroupEvent: {
-                Event::broadcast(BotJoinGroupEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::TimeOutEvent: {
-                Event::broadcast(TimeOutEvent(json_stringmover(j.eventData, "msg")));
-                break;
-            }
-            case eventTypes::BotOnlineEvent: {
-                Event::broadcast(BotOnlineEvent(j.botId));
-                break;
-            }
-            case eventTypes::NudgeEvent: {
-                Event::broadcast(NudgeEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::BotLeaveEvent: {
-                Event::broadcast(BotLeaveEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::MemberJoinRequestEvent: {
-                Event::broadcast(MemberJoinRequestEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::MessagePreSendEvent: {
-                Event::broadcast(MessagePreSendEvent(std::move(j)));
-                break;
-            }
-            case eventTypes::Command: {
-                CommandManager::commandList[j.eventData["bindId"]]->onCommand(
-                        j.eventData.contains("contact") ? Contact::deserializeToPointer(json_jsonmover(j.eventData, "contact")) : nullptr,
-                        Bot(j.botId),
-                        MessageChain::deserializationFromMessageJson(json::parse(json_stringmover(j.eventData, "message"))));
-                break;
-            }
-            default: {
-                throw APIException("Unreachable code", MIRAICP_EXCEPTION_WHERE);
-            }
-        }
-    }
-    Event::Event() : _all_events_(int(eventTypes::Types::count)) {}
-    bool Event::noRegistered(int index) {
-        return processor._all_events_[index].empty();
-    }
-    void Event::clear() noexcept {
-        for (auto &a: processor._all_events_) a.clear();
-    }
-    BaseEventData::BaseEventData(nlohmann::json j) {
-        this->botId = 0;
-        if (j.contains("subject")) {
-            this->botId = j["subject"]["botId"].get<QQID>();
-            this->subject = BuiltInContact(json_jsonmover(j, "subject"));
-        }
-        if (j.contains("object")) {
-            this->botId = j["object"]["botId"].get<QQID>();
-            this->object = BuiltInContact(json_jsonmover(j, "object"));
-        }
-        this->eventData = json_jsonmover(j, "eventData");
-    }
-    BaseEventData::BuiltInContact::BuiltInContact(nlohmann::json in_json) {
-        if (in_json.empty()) {
-            return;
-        }
-        this->botId = in_json["botId"];
-        this->id = in_json["id"];
-        if (in_json.contains("groupId"))
-            this->groupId = in_json["groupId"];
-        this->type = ContactType(in_json["type"]);
-    }
-    std::shared_ptr<Contact> BaseEventData::BuiltInContact::toContactPointer() {
-        switch (this->type) {
-            case ContactType::TypeFriend:
-                return std::make_shared<Friend>(this->id, this->botId);
-            case ContactType::TypeGroup:
-                return std::make_shared<Group>(this->id, this->botId);
-            case ContactType::TypeMember:
-                return std::make_shared<Member>(this->id, this->groupId, this->botId);
-            case ContactType::TypeBot:
-                return std::make_shared<Bot>(this->id);
-            case ContactType::TypeStranger:
-            case ContactType::TypeAnonymousMember:
-            default:
-                throw APIException("Type of builtInContact doesn't match or implement", MIRAICP_EXCEPTION_WHERE);
-        }
-    }
-    struct NodeHandle::NodeHandleInternal {
-        std::atomic<bool> flag;
-    };
-    NodeHandle::NodeHandle(bool a) : handle(new NodeHandleInternal{a}) {
-    }
-    bool NodeHandle::isEnable() const {
-        return handle->flag.load();
-    }
-    void NodeHandle::stop() {
-        handle->flag.store(false);
-    }
-    void NodeHandle::resume() {
-        handle->flag.store(true);
-    }
-    NodeHandle::~NodeHandle() {
-        delete handle;
-    }
-    bool Event::eventNode::run(MiraiCPEvent *a) const {
-        return _handle.isEnable() && func(a);
-    }
-    Event::eventNode::eventNode() : func(nullptr), _handle(true) {}
-    Event::eventNode::eventNode(std::function<bool(MiraiCPEvent *)> f) : func(std::move(f)), _handle(true) {}
-}
-/// Event.cpp END
-/// Logger.cpp START
-
-namespace MiraiCP {
-    Logger Logger::logger;
-    void Logger::log_interface(const std::string &content, int level) {
-        handler_trigger(content, level);
-        LibLoader::LoaderApi::loggerInterface(content, ("plugin/" + MiraiCP::CPPPlugin::config.getName()), -1, level);
-    }
-    void IdLogger::log_interface(const std::string &content, int level) {
-        handler_trigger(content, level);
-        LibLoader::LoaderApi::loggerInterface(content, "", static_cast<long long>(id), level);
-    }
-    IdLogger::IdLogger(QQID inId, Logger *l) : id(inId) {
-        this->loggerhandler = l->loggerhandler;
-    }
-    void Logger_interface::handler_trigger(Logger_interface::string log, int level) {
-        if (!loggerhandler) create_loggerhandler();
-        if (loggerhandler->enable && loggerhandler->action) loggerhandler->action(std::move(log), level);
-    }
-    void Logger_interface::registerHandle(Logger_interface::Action action) {
-        if (!this->loggerhandler) create_loggerhandler();
-        this->loggerhandler->action = std::move(action);
-    }
-    void Logger_interface::setHandleState(bool state) {
-        if (!this->loggerhandler) create_loggerhandler();
-        this->loggerhandler->enable = state;
-    }
-}
-/// Logger.cpp END
-/// Schedule.cpp START
-
-void MiraiCP::schedule(size_t time, const std::string &msg) {
-    LibLoader::LoaderApi::timer(CPPPlugin::config.id, msg, time);
-}
-void MiraiCP::schedule(std::chrono::seconds sec, const std::string &msg) {
-    schedule(sec.count(), msg);
-}
-/// Schedule.cpp END
-/// Exception.cpp START
+/// API.h END
 
 /// Member.h START
 #ifndef MIRAICP_PRO_EXCEPTION_MEMBER_H
@@ -2103,6 +1173,21 @@ namespace MiraiCP {
 }
 #endif
 /// Member.h END
+
+/// TimeOut.h START
+#ifndef MIRAICP_PRO_EXCEPTION_TIMEOUT_H
+#define MIRAICP_PRO_EXCEPTION_TIMEOUT_H
+namespace MiraiCP {
+    /// 超时
+    /// @see MiraiCPExceptionBase
+    class MIRAICP_EXPORT TimeOutException : public MiraiCPExceptionCRTP<TimeOutException> {
+    public:
+        explicit TimeOutException(const std::string &e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(e, std::move(_filename), _lineNum) {}
+        static string exceptionType() { return "TimeOutException"; }
+    };
+}
+#endif
+/// TimeOut.h END
 
 namespace MiraiCP {
     /// 机器人操作异常
@@ -2554,6 +1639,19 @@ namespace MiraiCP {
     std::string MusicShare::toMiraiCode() const {
         return "[mirai:musicshare:" + appName + "," + title + "," + summary + "," + jumpUrl + "," + picUrl + "," + musicUrl + "," + brief + "]";
     }
+    json MusicShare::toJson() const {
+        return {{"type", SingleMessage::messageType[this->internalType]},
+                {"kind", appName},
+                {"title", title},
+                {"summary", summary},
+                {"jumpUrl", jumpUrl},
+                {"pictureUrl", picUrl},
+                {"musicUrl", musicUrl},
+                {"brief", brief}};
+    }
+    std::string MusicShare::toString() const {
+        return this->toJson().dump();
+    }
     MarketFace::MarketFace(std::array<uint8_t, 16> id) : SingleMessage(MarketFace::type(), ""), faceId(id) {}
     bool MarketFace::operator==(const MarketFace &mf) const {
         return this->faceId == mf.faceId;
@@ -2568,32 +1666,205 @@ namespace MiraiCP {
     }
 }
 /// SingleMessage.cpp END
-/// IMiraiData.cpp START
+/// KtOperation.cpp START
 
-#include "json.hpp"
-#include <mutex>
-namespace MiraiCP {
-    void IMiraiData::requestRefresh() {
-        if (!MiraiCP::checkSafeCall() || Locker._inited.exchange(true)) return;
-        std::unique_lock<std::shared_mutex> _lck(Locker._mtx);
-        refreshInfo();
+#include <json.hpp>
+namespace MiraiCP::KtOperation {
+    std::string ktOperation(operation_set type, const nlohmann::json& data, bool catchErr, const std::string &errorInfo) {
+        return ktOperationStr(type, data.dump(), catchErr, errorInfo);
     }
-    void IMiraiData::forceRefreshNextTime() {
-        Locker._inited = false;
-    }
-    std::string IMiraiData::toString() const {
-        return toJson().dump();
-    }
-    nlohmann::json IMiraiData::toJson() const {
-        std::shared_lock<std::shared_mutex> lck(Locker._mtx);
-        return internalToJson();
-    }
-    nlohmann::json IMiraiData::internalToString() const {
-        return internalToJson().dump();
+    std::string ktOperationStr(operation_set type, const std::string& data, bool catchErr, const std::string &errorInfo) {
+        nlohmann::json j{{"type", type}, {"data", data}};
+        std::string dump = j.dump();
+        std::string re = LibLoader::LoaderApi::pluginOperation(dump);
+        if (catchErr) {
+            MIRAICP_ERROR_HANDLE(re, errorInfo);
+        }
+        return re;
     }
 }
-/// IMiraiData.cpp END
+/// KtOperation.cpp END
+/// Contact.cpp START
+
+/// GroupRelatedData.h START
+#ifndef MIRAICP_PRO_GROUPRELATEDDATA_H
+#define MIRAICP_PRO_GROUPRELATEDDATA_H
+namespace MiraiCP {
+    struct GroupRelatedData : public IContactData {
+        typedef IContactData Super;
+        /// group id
+        QQID _groupId;
+        nlohmann::json internalToJson() const override;
+        explicit GroupRelatedData(QQID in_groupid) : _groupId(in_groupid) {}
+    };
+}
+#endif
+/// GroupRelatedData.h END
+
+/// Upload.h START
+#ifndef MIRAICP_PRO_EXCEPTION_UPLOAD_H
+#define MIRAICP_PRO_EXCEPTION_UPLOAD_H
+namespace MiraiCP {
+    /// 文件读取异常.
+    /// @see MiraiCPExceptionBase
+    class MIRAICP_EXPORT UploadException : public MiraiCPExceptionCRTP<UploadException> {
+    public:
+        explicit UploadException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("上传(图片/文件)异常" + text, std::move(_filename), _lineNum) {}
+        static std::string exceptionType() { return "UploadException"; }
+    };
+}
+#endif
+/// Upload.h END
+
+namespace MiraiCP {
+    using json = nlohmann::json;
+    std::shared_ptr<Contact> Contact::deserializeToPointer(nlohmann::json j) {
+        uint8_t thistype = j["type"];
+        switch (thistype) {
+            case MIRAI_FRIEND: {
+                return std::make_shared<Friend>(std::move(j));
+            }
+            case MIRAI_MEMBER: {
+                return std::make_shared<Member>(std::move(j));
+            }
+            case MIRAI_GROUP: {
+                return std::make_shared<Group>(std::move(j));
+            }
+            default:
+                assert(0);
+                break;
+        }
+        return {};
+    }
+    MessageSource Contact::sendVoiceImpl(std::string path) const {
+        json j{{"path", std::move(path)},
+               {"contact", toJson()}};
+        std::string re = KtOperation::ktOperation(KtOperation::Voice, j);
+        if (re == "E1") {
+            throw UploadException("上传语音文件格式不对(必须为.amr/.silk)或文件不存在", MIRAICP_EXCEPTION_WHERE);
+        } else if (re == "E2") {
+            throw UploadException("上传语音文件大小超过服务器限制，一般限制在1MB上下", MIRAICP_EXCEPTION_WHERE);
+        }
+        return MessageSource::deserializeFromString(re);
+    }
+    void IContactData::deserialize(nlohmann::json in_json) {
+        _nickOrNameCard = json_stringmover(in_json, "nickOrNameCard");
+        _avatarUrl = json_stringmover(in_json, "avatarUrl");
+    }
+    void IContactData::refreshInfo() {
+        std::string temp = LowLevelAPI::getInfoSource(internalToJson());
+        MIRAICP_ERROR_HANDLE(temp, "");
+        LowLevelAPI::info tmp = LowLevelAPI::info0(temp);
+        this->_nickOrNameCard = tmp.nickOrNameCard;
+        this->_avatarUrl = tmp.avatarUrl;
+    }
+    nlohmann::json IContactData::internalToJson() const {
+        return {{"id", _id}, {"botId", _botId}, {"type", _type}};
+    }
+    void IContactData::updateJson(json &json_to_update) const {
+        json_to_update.update(toJson(), true);
+    }
+    nlohmann::json GroupRelatedData::internalToJson() const {
+        auto result = IContactData::internalToJson();
+        result["groupId"] = _groupId;
+        return result;
+    }
+    MessageSource Contact::quoteAndSendImpl(std::string msg, const MessageSource &ms) const {
+        json obj{{"messageSource", ms.serializeToString()},
+                 {"msg", std::move(msg)},
+                 {"contact", toJson()}};
+        std::string re = KtOperation::ktOperation(KtOperation::SendWithQuote, obj);
+        return MessageSource::deserializeFromString(re);
+    }
+    Image Contact::uploadImg(const std::string &path) const {
+        std::string re = LowLevelAPI::uploadImg0(path, toJson());
+        if (re == "E2")
+            throw UploadException("上传图片大小超过30MB,路径:" + path, MIRAICP_EXCEPTION_WHERE);
+        return Image::deserialize(re);
+    }
+    FlashImage Contact::uploadFlashImg(const std::string &path) const {
+        std::string re = LowLevelAPI::uploadImg0(path, toJson());
+        if (re == "E2")
+            throw UploadException("上传图片大小超过30MB,路径:" + path, MIRAICP_EXCEPTION_WHERE);
+        return FlashImage::deserialize(re);
+    }
+    MessageSource Contact::sendMsgImpl(std::string msg) const {
+        if (msg.empty()) {
+            throw IllegalArgumentException("不能发送空信息, 位置: Contact::SendMsg", MIRAICP_EXCEPTION_WHERE);
+        }
+        nlohmann::json j{{"message", std::move(msg)}, {"contact", toJson()}};
+        auto re = KtOperation::ktOperation(KtOperation::Send, j, true, "reach a error area, Contact::sendMsgImpl");
+        return MessageSource::deserializeFromString(re);
+    }
+    void Contact::SetInternalData(std::shared_ptr<IContactData> Data) { InternalData = std::move(Data); }
+    Contact::Contact(std::shared_ptr<IContactData> Data) {
+        SetInternalData(std::move(Data));
+    }
+    ContactType Contact::type() const { return InternalData->_type; }
+    QQID Contact::id() const { return InternalData->_id; }
+    QQID Contact::botid() const { return InternalData->_botId; }
+    nlohmann::json Contact::toJson() const { return InternalData->toJson(); }
+    void Contact::updateJson(json &j) const { InternalData->updateJson(j); }
+    std::string Contact::toString() const { return toJson().dump(); }
+    void Contact::refreshInfo() {
+        InternalData->requestRefresh();
+    }
+    void Contact::forceRefreshNextTime() {
+        InternalData->forceRefreshNextTime();
+    }
+    void Contact::forceRefreshNow() {
+        forceRefreshNextTime();
+        refreshInfo();
+    }
+    bool Contact::operator==(const Contact &c) const {
+        return id() == c.id() && InternalData->_type == c.InternalData->_type;
+    }
+    MessageSource Contact::unpackMsg(const MessageChain &msg) const {
+        return sendMsgImpl(msg.toString());
+    }
+    MessageSource Contact::unpackMsg(const MiraiCodeable &msg) const {
+        return sendMsgImpl(MessageChain::deserializationFromMiraiCode(msg.toMiraiCode()).toString());
+    }
+    MessageSource Contact::unpackMsg(std::string msg) const {
+        return sendMsgImpl(MessageChain(PlainText(std::move(msg))).toString());
+    }
+    MessageSource Contact::unpackQuote(const SingleMessage &s, const MessageSource &ms) const {
+        return quoteAndSendImpl(MessageChain(s).toString(), ms);
+    }
+    MessageSource Contact::unpackQuote(const std::string &s, const MessageSource &ms) const {
+        return quoteAndSendImpl(s, ms);
+    }
+    MessageSource Contact::unpackQuote(const MessageChain &mc, const MessageSource &ms) const {
+        return quoteAndSendImpl(mc.toString(), ms);
+    }
+    std::string internal::getNickFromIContactPtr(IContactData *p) {
+        p->requestRefresh();
+        std::shared_lock<std::shared_mutex> local_lck(p->getMutex());
+        return p->_nickOrNameCard;
+    }
+    std::string internal::getAvatarUrlFromIContactPtr(IContactData *p) {
+        p->requestRefresh();
+        std::shared_lock<std::shared_mutex> local_lck(p->getMutex());
+        return p->_avatarUrl;
+    }
+}
+/// Contact.cpp END
 /// Group.cpp START
+
+/// IllegalState.h START
+#ifndef MIRAICP_PRO_EXCEPTION_ILLEGALSTATE_H
+#define MIRAICP_PRO_EXCEPTION_ILLEGALSTATE_H
+namespace MiraiCP {
+    /// 通常为Mirai返回
+    /// @see MiraiCPExceptionBase
+    class MIRAICP_EXPORT IllegalStateException : public MiraiCPExceptionCRTP<IllegalStateException> {
+    public:
+        explicit IllegalStateException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("状态异常:" + text, std::move(_filename), _lineNum) {}
+        static std::string exceptionType() { return "IllegalStateException"; }
+    };
+}
+#endif
+/// IllegalState.h END
 
 namespace MiraiCP {
 #define LOC_CLASS_NAMESPACE Group
@@ -2629,7 +1900,7 @@ namespace MiraiCP {
         forceRefreshNextTime();
     }
     Group::Group(json in_json) : Contact(GetGroupFromPool(in_json)) {
-        auto ActualDataPtr = GetDataInternal();
+        auto ActualDataPtr = GET_DATA_INTERNAL();
         assert(ActualDataPtr != nullptr);
         bool needRefresh = false;
         if (in_json.contains("nickOrNameCard"))
@@ -2783,7 +2054,6 @@ namespace MiraiCP {
     Member Group::operator[](QQID a) {
         return getMember(a);
     }
-    IMPL_GETTER(setting)
     void GroupData::refreshInfo() {
         std::string re = LowLevelAPI::getInfoSource(internalToJson());
         LowLevelAPI::info tmp = LowLevelAPI::info0(re);
@@ -2810,14 +2080,150 @@ namespace MiraiCP {
         return Member(json::parse(re));
     }
     QQID Group::groupId() {
-        return GetDataInternal()->_groupId;
+        return GET_DATA_INTERNAL()->_groupId;
     }
     MessageSource Group::sendVoice(std::string path) {
         return sendVoiceImpl(std::move(path));
     }
+    IMPL_GETTER(setting)
 #undef LOC_CLASS_NAMESPACE
 }
 /// Group.cpp END
+/// Logger.cpp START
+
+namespace MiraiCP {
+    Logger Logger::logger;
+    void Logger::log_interface(const std::string &content, int level) {
+        handler_trigger(content, level);
+        LibLoader::LoaderApi::loggerInterface(content, ("plugin/" + MiraiCP::CPPPlugin::config.getName()), -1, level);
+    }
+    void IdLogger::log_interface(const std::string &content, int level) {
+        handler_trigger(content, level);
+        LibLoader::LoaderApi::loggerInterface(content, "", static_cast<long long>(id), level);
+    }
+    IdLogger::IdLogger(QQID inId, Logger *l) : id(inId) {
+        this->loggerhandler = l->loggerhandler;
+    }
+    void Logger_interface::handler_trigger(Logger_interface::string log, int level) {
+        if (!loggerhandler) create_loggerhandler();
+        if (loggerhandler->enable && loggerhandler->action) loggerhandler->action(std::move(log), level);
+    }
+    void Logger_interface::registerHandle(Logger_interface::Action action) {
+        if (!this->loggerhandler) create_loggerhandler();
+        this->loggerhandler->action = std::move(action);
+    }
+    void Logger_interface::setHandleState(bool state) {
+        if (!this->loggerhandler) create_loggerhandler();
+        this->loggerhandler->enable = state;
+    }
+}
+/// Logger.cpp END
+/// Friend.cpp START
+
+namespace MiraiCP {
+#define LOC_CLASS_NAMESPACE Friend
+    using json = nlohmann::json;
+    auto GetFriendPool(QQID id, QQID botid) noexcept {
+        static std::unordered_map<QQID, std::unordered_map<QQID, std::shared_ptr<Friend::DataType>>> Pool;
+        auto &val = Pool[botid][id];
+        if (!val) {
+            val = std::make_shared<Friend::DataType>();
+            val->_id = id;
+            val->_botId = botid;
+            val->_type = MIRAI_FRIEND;
+        }
+        return val;
+    }
+    auto GetFriendPool(const json &in_json) {
+        try {
+            return GetFriendPool(in_json["id"], in_json["id2"]);
+        } catch (const nlohmann::detail::exception &) {
+            throw IllegalArgumentException("构造Friend时传入的json异常", MIRAICP_EXCEPTION_WHERE);
+        }
+    }
+    /*好友类实现*/
+    Friend::Friend(QQID id, QQID botid) : Contact(GetFriendPool(id, botid)) {
+        forceRefreshNextTime();
+    }
+    Friend::Friend(nlohmann::json in_json) : Contact(GetFriendPool(in_json)) {
+        auto ActualDataPtr = GET_DATA_INTERNAL();
+        assert(ActualDataPtr != nullptr);
+        bool needRefresh = false;
+        if (in_json.contains("avatarUrl")) ActualDataPtr->_nickOrNameCard = json_stringmover(in_json, "nickOrNameCard");
+        else
+            needRefresh = true;
+        if (in_json.contains("avatarUrl")) ActualDataPtr->_avatarUrl = json_stringmover(in_json, "avatarUrl");
+        else
+            needRefresh = true;
+        if (needRefresh) forceRefreshNextTime();
+    }
+    void Friend::deleteFriend() {
+        json j{{"contact", this->toJson()}, {"quit", true}};
+        MIRAICP_ERROR_HANDLE(KtOperation::ktOperation(KtOperation::RefreshInfo, j), "");
+    }
+    void Friend::sendNudge() {
+        std::string re = KtOperation::ktOperation(KtOperation::SendNudge, toJson());
+        if (re == "E1")
+            throw IllegalStateException("发送戳一戳失败，登录协议不为phone/ipad", MIRAICP_EXCEPTION_WHERE);
+    }
+#undef LOC_CLASS_NAMESPACE
+}
+/// Friend.cpp END
+/// MessageSource.cpp START
+
+#include <json.hpp>
+namespace MiraiCP {
+    using json = nlohmann::json;
+    /// 撤回异常
+    /// @see MiraiCPExceptionBase
+    class MIRAICP_EXPORT RecallException : public MiraiCPExceptionCRTP<RecallException> {
+    public:
+        RecallException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("该消息已经被撤回", std::move(_filename), _lineNum) {}
+        static string exceptionType() { return "RecallException"; }
+    };
+    void MessageSource::recall() const {
+        std::string re = KtOperation::ktOperationStr(KtOperation::Recall, serializeToString());
+        if (re == "E2") throw RecallException(MIRAICP_EXCEPTION_WHERE);
+    }
+    MessageSource::MessageSource(std::string ids,
+                                 std::string internalids,
+                                 std::string source)
+        : ids(std::move(ids)),
+          internalids(std::move(internalids)),
+          source(std::move(source)) {}
+    std::string MessageSource::serializeToString() const {
+        return source;
+    }
+    MessageSource MessageSource::deserializeFromString(const std::string &source) {
+        json j = json::parse(source);
+        try {
+            return {j["ids"].dump(), j["internalIds"].dump(), source};
+        } catch (json::type_error &e) {
+            Logger::logger.error("消息源序列化出错，格式不符合(MessageSource::deserializeFromString)");
+            Logger::logger.error(source);
+            Logger::logger.error(e.what());
+            throw IllegalArgumentException(std::string("消息源序列化出错，格式不符合(MessageSource::deserializeFromString), ") + e.what(), MIRAICP_EXCEPTION_WHERE);
+        }
+    }
+    bool MessageSource::operator==(const MessageSource &ms) const {
+        return this->ids == ms.ids && this->internalids == ms.internalids;
+    }
+}
+/// MessageSource.cpp END
+/// MiraiCode.cpp START
+
+namespace MiraiCP {
+    std::string MiraiCode::toString() {
+        return Tools::escapeFromMiraiCode(this->content);
+    }
+    MiraiCode::MiraiCode(const std::string &a, bool convert) {
+        if (!convert)
+            content = a;
+        else
+            content = Tools::escapeToMiraiCode(a);
+    }
+}
+/// MiraiCode.cpp END
 /// Member.cpp START
 
 namespace MiraiCP {
@@ -2868,7 +2274,7 @@ namespace MiraiCP {
         forceRefreshNextTime();
     }
     Member::Member(nlohmann::json in_json) : Contact(GetMemberFromPool(in_json)) {
-        auto ActualDataPtr = GetDataInternal();
+        auto ActualDataPtr = GET_DATA_INTERNAL();
         assert(ActualDataPtr != nullptr);
         bool needrefresh = false;
         if (in_json.contains("nickOrNameCard")) ActualDataPtr->_nickOrNameCard = json_stringmover(in_json, "nickOrNameCard");
@@ -2948,161 +2354,656 @@ namespace MiraiCP {
 #undef LOC_CLASS_NAMESPACE
 }
 /// Member.cpp END
-/// KtOperation.cpp START
+/// Event.cpp START
+
+#include <atomic>
+namespace MiraiCP {
+    namespace CommandManager {
+        extern std::vector<std::unique_ptr<IRawCommand>> commandList;
+    };
+    using json = nlohmann::json;
+    Event Event::processor;
+    GroupMessageEvent::GroupMessageEvent(BaseEventData j) : BotEvent(j.botId),
+                                                            group(j.subject->id, j.botId),
+                                                            sender(j.object->id, j.object->groupId, j.botId),
+                                                            message(MessageChain::deserializationFromMessageJson(
+                                                                            json::parse(j.eventData["message"].get<std::string>()))
+                                                                            .plus(MessageSource::deserializeFromString(
+                                                                                    j.eventData["source"].get<std::string>()))) {
+    }
+    MessageChain GroupMessageEvent::nextMessage(long time, bool halt) const {
+        json j{{"contact", this->group.toJson()},
+               {"time", time},
+               {"halt", halt}};
+        std::string r = KtOperation::ktOperation(KtOperation::NextMsg, j);
+        if (r == "E1")
+            throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
+        json re = json::parse(r);
+        return MessageChain::deserializationFromMessageJson(nlohmann::json::parse(json_stringmover(re, "message"))).plus(MessageSource::deserializeFromString(re["messageSource"]));
+    }
+    MessageChain GroupMessageEvent::senderNextMessage(long time, bool halt) const {
+        json j{{"contact", this->sender.toJson()},
+               {"time", time},
+               {"halt", halt}};
+        std::string r = KtOperation::ktOperation(KtOperation::NextMsg, j);
+        if (r == "E1")
+            throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
+        json re = json::parse(r);
+        return MessageChain::deserializationFromMessageJson(
+                       json::parse(re["message"].get<std::string>()))
+                .plus(
+                        MessageSource::deserializeFromString(re["messageSource"]));
+    }
+    PrivateMessageEvent::PrivateMessageEvent(BaseEventData j) : BotEvent(j.botId),
+                                                                sender(j.subject->id, j.subject->botId),
+                                                                message(MessageChain::deserializationFromMessageJson(
+                                                                                json::parse(j.eventData["message"].get<std::string>()))
+                                                                                .plus(MessageSource::deserializeFromString(
+                                                                                        j.eventData["source"].get<std::string>()))) {
+    }
+    MessageChain PrivateMessageEvent::nextMessage(long time, bool halt) const {
+        json j{{"contact", this->sender.toJson()},
+               {"time", time},
+               {"halt", halt}};
+        std::string r = KtOperation::ktOperation(KtOperation::NextMsg, j);
+        if (r == "E1")
+            throw TimeOutException("取下一条信息超时", MIRAICP_EXCEPTION_WHERE);
+        json re = json::parse(r);
+        return MessageChain::deserializationFromMessageJson(json::parse(re["message"].get<std::string>()))
+                .plus(MessageSource::deserializeFromString(re["messageSource"]));
+    }
+    GroupInviteEvent::GroupInviteEvent(BaseEventData j) : BotEvent(j.botId),
+                                                          source(json_stringmover(j.eventData, "request")),
+                                                          inviterNick(
+                                                                  json_stringmover(j.eventData, "invitorNick")),
+                                                          groupName(json_stringmover(j.eventData, "groupName")),
+                                                          group(j.subject->id, j.subject->botId),
+                                                          inviter(j.object->id, j.object->botId),
+                                                          requestEventId(j.eventData["requestEventId"]) {
+    }
+    void groupInviteInternal(const std::string &source, QQID botid, bool accept) {
+        nlohmann::json j{{"source", source},
+                         {"sign", accept},
+                         {"botId", botid}};
+        std::string re = KtOperation::ktOperation(KtOperation::Gioperation, j);
+        if (re == "E") Logger::logger.error("群聊邀请事件同意失败(可能因为重复处理),id:" + source);
+    }
+    void GroupInviteEvent::reject() {
+        groupInviteInternal(source, bot.id(), false);
+    }
+    void GroupInviteEvent::accept() {
+        groupInviteInternal(source, bot.id(), true);
+    }
+    NewFriendRequestEvent::NewFriendRequestEvent(BaseEventData j) : BotEvent(j.botId),
+                                                                    source(json_stringmover(j.eventData, "request")),
+                                                                    from(j.object->id, j.object->botId),
+                                                                    fromGroup(j.subject == std::nullopt ? std::nullopt : std::optional(Group(j.subject->id, j.subject->botId))),
+                                                                    nick(json_stringmover(j.eventData, "requesterNick")),
+                                                                    message(json_stringmover(j.eventData, "message")),
+                                                                    requestEventId(j.eventData["requestEventId"]) {
+    }
+    void newFriendRequestInternal(const std::string &source, QQID botId, bool accept, bool ban = false) {
+        nlohmann::json j{{"source", source},
+                         {"sign", accept},
+                         {"botId", botId},
+                         {"ban", ban}};
+        std::string re = KtOperation::ktOperation(KtOperation::Nfroperation, j);
+        if (re == "E") Logger::logger.error("好友申请事件同意失败(可能因为重复处理),id:" + source);
+    }
+    void NewFriendRequestEvent::reject(bool ban) {
+        newFriendRequestInternal(source, bot.id(), false, ban);
+    }
+    void NewFriendRequestEvent::accept() {
+        newFriendRequestInternal(source, bot.id(), true);
+    }
+    MemberJoinEvent::MemberJoinEvent(BaseEventData j) : BotEvent(j.botId),
+                                                        type(joinType(j.eventData["eventType"].get<int>())),
+                                                        member(j.object->id, j.subject->groupId, j.botId),
+                                                        group(j.subject->id, j.subject->botId),
+                                                        inviter(j.object == std::nullopt ? std::nullopt : std::optional(Member(j.object->id, j.object->groupId, j.object->botId))) {
+    }
+    MemberLeaveEvent::MemberLeaveEvent(BaseEventData j) : BotEvent(j.botId),
+                                                          member(j.object->id, j.object->groupId, j.object->botId),
+                                                          group(j.subject->id, j.subject->botId),
+                                                          operater(!j.eventData.contains("operator") ? std::nullopt : std::optional(Member(j.eventData["operator"]["id"], j.eventData["operator"]["groupId"], j.eventData["operator"]["botId"]))),
+                                                          type(j.eventData["eventType"]) {
+    }
+    FriendRecallEvent::FriendRecallEvent(BaseEventData j) : BotEvent(j.botId),
+                                                            time(j.eventData["messageTime"]),
+                                                            author(j.eventData["author"]["id"], j.eventData["author"]["botId"]),
+                                                            operater(j.object->id, j.object->botId),
+                                                            ids(j.eventData["messageIds"].dump()),
+                                                            internalIds(j.eventData["messageInternalIds"].dump()) {
+    }
+    MemberRecallEvent::MemberRecallEvent(BaseEventData j) : BotEvent(j.subject->botId),
+                                                            time(j.eventData["messageTime"]),
+                                                            author(j.eventData["author"]["id"], j.eventData["author"]["groupId"], j.eventData["author"]["botId"]),
+                                                            operater(j.object->id, j.object->groupId, j.object->botId),
+                                                            ids(j.eventData["messageIds"].dump()),
+                                                            internalIds(j.eventData["messageInternalIds"].dump()) {
+    }
+    BotJoinGroupEvent::BotJoinGroupEvent(BaseEventData j) : BotEvent(j.botId),
+                                                            group(j.subject->id, j.subject->botId),
+                                                            inviter(j.eventData.contains("inviter") ? std::optional(
+                                                                                                              Member(j.eventData["inviter"]["id"],
+                                                                                                                     j.eventData["inviter"]["groupId"],
+                                                                                                                     j.eventData["inviter"]["botId"]))
+                                                                                                    : std::nullopt),
+                                                            type(j.eventData["eventType"]) {
+    }
+    GroupTempMessageEvent::GroupTempMessageEvent(BaseEventData j) : BotEvent(j.botId),
+                                                                    group(j.subject->id, j.subject->botId),
+                                                                    sender(j.object->id, j.object->groupId, j.object->botId),
+                                                                    message(MessageChain::deserializationFromMessageJson(
+                                                                                    json::parse(j.eventData["message"].get<std::string>()))
+                                                                                    .plus(MessageSource::deserializeFromString(
+                                                                                            j.eventData["source"]))) {
+    }
+    NudgeEvent::NudgeEvent(BaseEventData j) : BotEvent(j.botId),
+                                              from(j.object->toContactPointer()),
+                                              target(BaseEventData::BuiltInContact(
+                                                             j.eventData["target"])
+                                                             .toContactPointer()),
+                                              subject(j.subject->toContactPointer()) {
+    }
+    BotLeaveEvent::BotLeaveEvent(BaseEventData j) : BotEvent(j.botId),
+                                                    group(j.subject->id, j.subject->botId),
+                                                    type(j.eventData["eventType"]),
+                                                    operater(j.object->id, j.object->groupId, j.object->botId) {
+    }
+    MemberJoinRequestEvent::MemberJoinRequestEvent(BaseEventData j) : BotEvent(j.botId),
+                                                                      source(json_jsonmover(j.eventData,
+                                                                                            "requestData")),
+                                                                      group(j.subject->id, j.subject->botId),
+                                                                      inviter(j.eventData.contains("inviter")
+                                                                                      ? std::optional(
+                                                                                                Member(json_jsonmover(
+                                                                                                        j.eventData, "inviter")))
+                                                                                      : std::nullopt),
+                                                                      from(j.object->id, j.object->groupId,
+                                                                           j.object->botId),
+                                                                      fromNick(json_jsonmover(j.eventData,
+                                                                                              "fromNick")),
+                                                                      message(json_jsonmover(j.eventData,
+                                                                                             "message")) {
+    }
+    /**
+     * @brief 底层通过MemberJoinRequest
+     * @param s 序列化后的文本
+     */
+    void memberJoinRequestInternal(std::string_view s, QQID botid, bool sign, std::string msg = "") {
+        nlohmann::json j{{"source", s},
+                         {"botId", botid},
+                         {"sign", sign},
+                         {"msg", std::move(msg)}};
+        KtOperation::ktOperation(KtOperation::MemberJoinRequest, j);
+    }
+    void MemberJoinRequestEvent::accept() {
+        memberJoinRequestInternal(source, bot.id(), true);
+    }
+    void MemberJoinRequestEvent::reject(std::string msg) {
+        memberJoinRequestInternal(source, bot.id(), false, std::move(msg));
+    }
+    MessagePreSendEvent::MessagePreSendEvent(BaseEventData j) : BotEvent(j.botId),
+                                                                target(j.subject->toContactPointer()),
+                                                                message(MessageChain::deserializationFromMessageJson(
+                                                                        nlohmann::json::parse(
+                                                                                json_stringmover(j.eventData, "message")))) {
+    }
+    void Event::incomingEvent(BaseEventData j, int type) {
+        switch (type) {
+            case eventTypes::GroupMessageEvent: {
+                Event::broadcast(GroupMessageEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::FriendMessageEvent: {
+                Event::broadcast(PrivateMessageEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::GroupTempMessageEvent: {
+                Event::broadcast(GroupTempMessageEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::GroupInviteEvent: {
+                Event::broadcast(GroupInviteEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::NewFriendRequestEvent: {
+                Event::broadcast(NewFriendRequestEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::MemberJoinEvent: {
+                Event::broadcast(MemberJoinEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::MemberLeaveEvent: {
+                Event::broadcast(MemberLeaveEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::FriendRecallEvent: {
+                Event::broadcast(RecallEvent::FriendRecallEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::MemberRecallEvent: {
+                Event::broadcast(RecallEvent::MemberRecallEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::BotJoinGroupEvent: {
+                Event::broadcast(BotJoinGroupEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::TimeOutEvent: {
+                Event::broadcast(TimeOutEvent(json_stringmover(j.eventData, "msg")));
+                break;
+            }
+            case eventTypes::BotOnlineEvent: {
+                Event::broadcast(BotOnlineEvent(j.botId));
+                break;
+            }
+            case eventTypes::NudgeEvent: {
+                Event::broadcast(NudgeEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::BotLeaveEvent: {
+                Event::broadcast(BotLeaveEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::MemberJoinRequestEvent: {
+                Event::broadcast(MemberJoinRequestEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::MessagePreSendEvent: {
+                Event::broadcast(MessagePreSendEvent(std::move(j)));
+                break;
+            }
+            case eventTypes::Command: {
+                CommandManager::commandList[j.eventData["bindId"]]->onCommand(
+                        j.eventData.contains("contact") ? Contact::deserializeToPointer(json_jsonmover(j.eventData, "contact")) : nullptr,
+                        Bot(j.botId),
+                        MessageChain::deserializationFromMessageJson(json::parse(json_stringmover(j.eventData, "message"))));
+                break;
+            }
+            default: {
+                throw APIException("Unreachable code", MIRAICP_EXCEPTION_WHERE);
+            }
+        }
+    }
+    Event::Event() : _all_events_(int(eventTypes::Types::count)) {}
+    bool Event::internalNoRegistered(int index) const {
+        std::shared_lock lk(eventsMtx);
+        return _all_events_[index].empty();
+    }
+    void Event::internalClear() noexcept {
+        std::unique_lock lk(eventsMtx);
+        for (auto &a: _all_events_) a.clear();
+    }
+    void Event::internalBroadcast(MiraiCPEvent *event, size_t eventId) const {
+        std::shared_lock lk(eventsMtx);
+        for (auto &&[k, v]: _all_events_[eventId]) {
+            for (auto &&a: v) {
+                if (a->run(event)) return;
+            }
+        }
+    }
+    NodeHandle *Event::internalRegister(std::function<bool(MiraiCPEvent *)> callback, size_t where, Event::priority_level level) {
+        std::unique_lock lk(eventsMtx);
+        auto &row = _all_events_[where][level];
+        row.emplace_back(std::make_unique<eventNode>(std::move(callback)));
+        return row[row.size() - 1]->getHandle();
+    }
+    BaseEventData::BaseEventData(nlohmann::json j) {
+        this->botId = 0;
+        if (j.contains("subject")) {
+            this->botId = j["subject"]["botId"].get<QQID>();
+            this->subject = BuiltInContact(json_jsonmover(j, "subject"));
+        }
+        if (j.contains("object")) {
+            this->botId = j["object"]["botId"].get<QQID>();
+            this->object = BuiltInContact(json_jsonmover(j, "object"));
+        }
+        this->eventData = json_jsonmover(j, "eventData");
+    }
+    BaseEventData::BuiltInContact::BuiltInContact(nlohmann::json in_json) {
+        if (in_json.empty()) {
+            return;
+        }
+        this->botId = in_json["botId"];
+        this->id = in_json["id"];
+        if (in_json.contains("groupId"))
+            this->groupId = in_json["groupId"];
+        this->type = ContactType(in_json["type"]);
+    }
+    std::shared_ptr<Contact> BaseEventData::BuiltInContact::toContactPointer() {
+        switch (this->type) {
+            case ContactType::TypeFriend:
+                return std::make_shared<Friend>(this->id, this->botId);
+            case ContactType::TypeGroup:
+                return std::make_shared<Group>(this->id, this->botId);
+            case ContactType::TypeMember:
+                return std::make_shared<Member>(this->id, this->groupId, this->botId);
+            case ContactType::TypeBot:
+                return std::make_shared<Bot>(this->id);
+            case ContactType::TypeStranger:
+            case ContactType::TypeAnonymousMember:
+            default:
+                throw APIException("Type of builtInContact doesn't match or implement", MIRAICP_EXCEPTION_WHERE);
+        }
+    }
+    struct NodeHandle::NodeHandleInternal {
+        std::atomic<bool> flag;
+    };
+    NodeHandle::NodeHandle(bool a) : handle(new NodeHandleInternal{a}) {
+    }
+    bool NodeHandle::isEnable() const {
+        return handle->flag.load();
+    }
+    void NodeHandle::stop() {
+        handle->flag.store(false);
+    }
+    void NodeHandle::resume() {
+        handle->flag.store(true);
+    }
+    NodeHandle::~NodeHandle() {
+        delete handle;
+    }
+}
+/// Event.cpp END
+/// Schedule.cpp START
+
+void MiraiCP::schedule(size_t time, const std::string &msg) {
+    LibLoader::LoaderApi::timer(CPPPlugin::config.id, msg, time);
+}
+void MiraiCP::schedule(std::chrono::seconds sec, const std::string &msg) {
+    schedule(sec.count(), msg);
+}
+/// Schedule.cpp END
+/// IMiraiData.cpp START
+
+#include "json.hpp"
+#include <mutex>
+namespace MiraiCP {
+    void IMiraiData::requestRefresh() {
+        if (!MiraiCP::checkSafeCall() || Locker._inited.exchange(true)) return;
+        std::unique_lock<std::shared_mutex> _lck(Locker._mtx);
+        refreshInfo();
+    }
+    void IMiraiData::forceRefreshNextTime() {
+        Locker._inited = false;
+    }
+    std::string IMiraiData::toString() const {
+        return toJson().dump();
+    }
+    nlohmann::json IMiraiData::toJson() const {
+        std::shared_lock<std::shared_mutex> lck(Locker._mtx);
+        return internalToJson();
+    }
+    nlohmann::json IMiraiData::internalToString() const {
+        return internalToJson().dump();
+    }
+}
+/// IMiraiData.cpp END
+/// ForwardedMessage.cpp START
 
 #include <json.hpp>
-namespace MiraiCP::KtOperation {
-    std::string ktOperation(operation_set type, const nlohmann::json& data, bool catchErr, const std::string &errorInfo) {
-        return ktOperationStr(type, data.dump(), catchErr, errorInfo);
-    }
-    std::string ktOperationStr(operation_set type, const std::string& data, bool catchErr, const std::string &errorInfo) {
-        nlohmann::json j{{"type", type}, {"data", data}};
-        std::string dump = j.dump();
-        std::string re = LibLoader::LoaderApi::pluginOperation(dump);
-        if (catchErr) {
-            MIRAICP_ERROR_HANDLE(re, errorInfo);
-        }
-        return re;
-    }
-}
-/// KtOperation.cpp END
-/// WindowsMin.h START
-#ifndef MIRAICP_PRO_WINDOWSMIN_H
-#define MIRAICP_PRO_WINDOWSMIN_H
-#if MIRAICP_WINDOWS
-#ifndef FULL_WINTARD
-#define WIN32_LEAN_AND_MEAN
-#define NOGDICAPMASKS
-#define NOSYSMETRICS
-#define NOMENUS
-#define NOICONS
-#define NOSYSCOMMANDS
-#define NORASTEROPS
-#define OEMRESOURCE
-#define NOATOM
-#define NOCLIPBOARD
-#define NOCOLOR
-#define NOCTLMGR
-#define NODRAWTEXT
-#define NOKERNEL
-#define NOMEMMGR
-#define NOMETAFILE
-#define NOOPENFILE
-#define NOSCROLL
-#define NOSERVICE
-#define NOSOUND
-#define NOTEXTMETRIC
-#define NOWH
-#define NOCOMM
-#define NOKANJI
-#define NOHELP
-#define NOPROFILER
-#define NODEFERWINDOWPOS
-#define NOMCX
-#define NORPC
-#define NOPROXYSTUB
-#define NOIMAGE
-#define NOTAPE
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <Windows.h>
-#endif
-#endif
-/// WindowsMin.h END
-/// MiraiCPStringInternal.cpp START
-
-#include <cstring>
 namespace MiraiCP {
-    MiraiCPStringview::MiraiCPStringview(const char *char_str) : str(char_str) {
-        if (char_str == nullptr) return;
-        _size = strlen(char_str);
+    using json = nlohmann::json;
+    ForwardedNode::ForwardedNode(QQID id, std::string name, ForwardedMessage _message, int t)
+        : id(id), name(std::move(name)),
+          message(MessageChain(std::move(_message))),
+          time(t), isForwardedMessage(true) {}
+    ForwardedNode::ForwardedNode(QQID id, std::string name, MessageChain message, int time)
+        : id(id), name(std::move(name)), message(std::move(message)), time(time), isForwardedMessage(false) {}
+    bool ForwardedMessageDisplayStrategy::operator==(const ForwardedMessageDisplayStrategy &other) const {
+        return this->toJson() == other.toJson();
     }
-    MiraiCPStringview::MiraiCPStringview(const std::string &string_str)
-        : str(string_str.c_str()), _size(string_str.size()) {}
-    MiraiCPStringview::MiraiCPStringview(const MiraiCPString &miraiCPString)
-        : str(miraiCPString.c_str()), _size(miraiCPString.size()) {}
-    void MiraiCPString::construction() {
-        str = (char *) ::std::malloc(sizeof(char) * (_size + 1));
-        if (str == nullptr) {
-            throw std::bad_alloc();
+    nlohmann::json ForwardedMessageDisplayStrategy::toJson() const {
+        nlohmann::json j;
+        j["title"] = title;
+        j["brief"] = brief;
+        j["source"] = source;
+        j["summary"] = summary;
+        j["preview"] = preview;
+        return j;
+    }
+    ForwardedMessageDisplayStrategy ForwardedMessageDisplayStrategy::fromJson(const json &j) {
+        return {j["title"], j["brief"], j["source"], j["summary"], j["preview"].get<std::vector<std::string>>()};
+    }
+    ForwardedMessageDisplayStrategy::ForwardedMessageDisplayStrategy(std::string title, std::string brief, std::string source, std::string summary, std::vector<std::string> preview)
+        : title(std::move(title)), brief(std::move(brief)), source(std::move(source)), summary(std::move(summary)), preview(std::move(preview)) {}
+    bool ForwardedMessage::operator==(const ForwardedMessage &m) const {
+        if (this->nodes.size() != m.nodes.size()) return false;
+        int i = 0;
+        if (!(this->display == m.display)) return false;
+        return std::all_of(this->nodes.begin(), this->nodes.end(), [&i, &m](const auto &n) {
+            return n.message == m[i++].message;
+        });
+    }
+    json ForwardedMessage::nodesToJson() const {
+        auto value = json::array();
+        for (const ForwardedNode &node: nodes) {
+            json temp{{"senderId", node.id},
+                      {"time", node.time},
+                      {"senderName", node.name},
+                      {"messageChain", node.message.toJson()}};
+            value.emplace_back(std::move(temp));
         }
+        return value;
     }
-    MiraiCPString::~MiraiCPString() {
-        if (str != nullptr) {
-            free_this(str);
-            str = nullptr;
+    MessageSource ForwardedMessage::sendTo(Contact *c) const {
+        auto msg = toJson();
+        msg.update(display.toJson());
+        json req{{"contact", c->toJson()},
+                 {"msg", json::array({msg}).dump()}};
+        std::string re = KtOperation::ktOperation(KtOperation::Buildforward, req);
+        MIRAICP_ERROR_HANDLE(re, "");
+        return MessageSource::deserializeFromString(re);
+    }
+    ForwardedMessage ForwardedMessage::deserializationFromMessageJson(const json &msg) {
+        if (!(msg.contains("type") && msg["type"] == "ForwardMessage") && msg.contains("nodeList"))
+            throw std::invalid_argument("json is not a ForwardMessage");
+        ForwardedMessageDisplayStrategy display;
+        if (msg.contains("title") && msg.contains("brief") && msg.contains("source") && msg.contains("summary") && msg.contains("preview"))
+            display = ForwardedMessageDisplayStrategy::fromJson(msg);
+        else
+            display = ForwardedMessageDisplayStrategy::defaultStrategy();
+        std::vector<ForwardedNode> nodes;
+        auto &j = msg["nodeList"];
+        if (!j.is_array())
+            throw IllegalArgumentException("OnlineForwardedMessage参数异常, 应为 array", MIRAICP_EXCEPTION_WHERE);
+        try {
+            for (auto &&a: j) {
+                if (a["messageChain"][0].contains("kind") && a["messageChain"][0]["kind"] == "FORWARD") {
+                    nodes.emplace_back(a["senderId"], a["senderName"], ForwardedMessage::deserializationFromMessageJson(a["messageChain"][1]["nodeList"]), a["time"]);
+                } else {
+                    nodes.emplace_back(a["senderId"], a["senderName"], MessageChain::deserializationFromMessageJson(a["messageChain"]), a["time"]);
+                }
+            }
+        } catch (const json::parse_error &) {
+            throw APIException("OnlineForwardedMessage格式化异常", MIRAICP_EXCEPTION_WHERE);
         }
+        return ForwardedMessage(std::move(nodes), display);
     }
-    MiraiCPString::MiraiCPString(const MiraiCPString &other) {
-        _size = other._size;
-        if (_size == 0) return;
-        construction();
-        assert(str != nullptr);
-        memcpy(str, other.str, _size * sizeof(char));
-        str[_size] = 0;
+    nlohmann::json ForwardedMessage::toJson() const {
+        return {{"type", "ForwardMessage"},
+                {"preview", display.preview},
+                {"source", display.source},
+                {"title", display.title},
+                {"brief", display.brief},
+                {"summary", display.summary},
+                {"nodeList", nodesToJson()}};
     }
-    MiraiCPString::MiraiCPString(MiraiCPString &&temp) noexcept {
-        swap(temp);
+    void ForwardedMessage::add(ForwardedNode a) {
+        this->nodes.emplace_back(std::move(a));
     }
-    MiraiCPString::MiraiCPString(const char *char_str) {
-        if (char_str == nullptr) return;
-        _size = strlen(char_str);
-        if (0 == _size) return;
-        construction();
-        assert(str != nullptr);
-        memcpy(str, char_str, _size * sizeof(char));
-        str[_size] = 0;
-    }
-    MiraiCPString::MiraiCPString(const std::string &string_str) {
-        _size = string_str.size();
-        if (!_size) return;
-        construction();
-        assert(str != nullptr);
-        memcpy(str, string_str.c_str(), _size * sizeof(char));
-        str[_size] = 0;
-    }
-    const char *MiraiCPString::copyToCharPtr() const {
-        if (str == nullptr || _size == 0) return new char[1]{0};
-        char *t = new char[_size + 1];
-        memcpy(t, str, (_size + 1) * sizeof(char));
-        return t;
-    }
-    void MiraiCPString::reserve(size_t inSize) {
-        if (inSize <= _size) return;
-        char *t = (char *) ::std::malloc(sizeof(char) * (inSize + 1));
-        if (t == nullptr) {
-            throw std::bad_alloc();
-        }
-        if (str != nullptr) {
-            memcpy(t, str, _size * sizeof(char));
-            free_this(str);
-        }
-        str = t;
-        _size = inSize;
-        str[_size] = 0;
-        free_this = ::std::free;
-    }
-    bool MiraiCPString::operator==(const MiraiCPString &another) const {
-        return another._size == _size && (_size == 0 || strcmp(another.str, str) == 0);
-    }
-    MiraiCPString &MiraiCPString::operator=(const MiraiCPString &another) {
-        MiraiCPString temp(another);
-        swap(temp);
+    auto &ForwardedMessage::operator+=(ForwardedNode a) {
+        this->add(std::move(a));
         return *this;
     }
-    MiraiCPString &MiraiCPString::operator=(MiraiCPString &&another) noexcept {
-        swap(another);
-        return *this;
+    ForwardedMessage::ForwardedMessage(std::initializer_list<ForwardedNode> nodes, ForwardedMessageDisplayStrategy display)
+        : nodes(std::vector(nodes)), display(std::move(display)) {}
+    ForwardedMessage::ForwardedMessage(std::vector<ForwardedNode> inNodes, ForwardedMessageDisplayStrategy display)
+        : nodes(std::move(inNodes)), display(std::move(display)) {}
+}
+/// ForwardedMessage.cpp END
+/// utils.cpp START
+
+#include <iostream>
+using json = nlohmann::json;
+namespace LibLoader::LoaderApi {
+    const interface_funcs *get_loader_apis();
+    MIRAICP_EXPORT void set_loader_apis(const LibLoader::LoaderApi::interface_funcs *apis) noexcept;
+    MIRAICP_EXPORT void reset_loader_apis() noexcept;
+}
+/// 安全检查
+extern "C" {
+MIRAICP_EXPORT void _unused_MiraiCP_internal_safety_check() {
+    MiraiCP::enrollPlugin();
+}
+}
+extern "C" {
+/// 插件开启入口
+MIRAICP_EXPORT int FUNC_ENTRANCE(const LibLoader::LoaderApi::interface_funcs &funcs) {
+    static_assert(std::is_same_v<decltype(&FUNC_ENTRANCE), LibLoader::plugin_entrance_func_ptr>);
+    using namespace MiraiCP;
+    Event::clear();
+    LibLoader::LoaderApi::set_loader_apis(&funcs);
+    assert(LibLoader::LoaderApi::get_loader_apis() != nullptr);
+    try {
+        Logger::logger.info("开始启动插件: " + MiraiCP::CPPPlugin::config.getId());
+        enrollPlugin();
+        if (CPPPlugin::plugin != nullptr) {
+            CPPPlugin::plugin->onEnable();
+        }
+    } catch (const MiraiCPExceptionBase &e) {
+        try {
+            std::cerr.flush();
+            e.raise();
+            Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
+        } catch (...) {}
+        return PLUGIN_ERROR;
+    } catch (const std::exception &e) {
+        try {
+            std::cerr.flush();
+            Logger::logger.error(e.what());
+            Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
+        } catch (...) {}
+        return PLUGIN_ERROR;
+    } catch (...) {
+        try {
+            std::cerr.flush();
+            Logger::logger.error("插件(id=" + CPPPlugin::config.getId() + ", name=" + CPPPlugin::config.name + ")启动失败");
+        } catch (...) {}
+        return PLUGIN_ERROR;
     }
-    void MiraiCPString::swap(MiraiCPString &other) noexcept {
-        std::swap(str, other.str);
-        std::swap(_size, other._size);
-        std::swap(free_this, other.free_this);
+    return PLUGIN_NORMAL;
+}
+/// 插件结束(也可能是暂时的disable)
+MIRAICP_EXPORT int FUNC_EXIT() {
+    static_assert(std::is_same_v<decltype(&FUNC_EXIT), LibLoader::plugin_func_ptr>);
+    using namespace MiraiCP;
+    if (LibLoader::LoaderApi::get_loader_apis() == nullptr) return PLUGIN_NORMAL;
+    MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.info("开始禁用插件：" + MiraiCP::CPPPlugin::config.getId());)
+    Event::clear();
+    MIRAICP_CRITICAL_NOEXCEPT_BLOCK(if (CPPPlugin::plugin != nullptr) CPPPlugin::plugin->onDisable();)
+    CPPPlugin::plugin.reset();
+    LibLoader::LoaderApi::reset_loader_apis();
+    return PLUGIN_NORMAL;
+}
+/// 消息解析分流
+/// env != null, call from jni
+/// 除了致命问题，该函数不会返回 ERROR
+MIRAICP_EXPORT int FUNC_EVENT(const MiraiCP::MiraiCPString &c) {
+    static_assert(std::is_same_v<decltype(&FUNC_EVENT), LibLoader::plugin_event_func_ptr>);
+    using namespace MiraiCP;
+    std::string content = c;
+    json j;
+    try {
+        j = json::parse(content);
+    } catch (json::parse_error &e) {
+        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("消息解析分流：格式化json错误");
+                                        Logger::logger.error("For debug: " + content);
+                                        Logger::logger.error(e.what());)
+        return PLUGIN_NORMAL;
+    }
+    int type;
+    try {
+        if (!j.is_object() || !j.contains("eventId") || !j["eventId"].is_number()) {
+            MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("Json格式错误：没有eventId这一field或这一field不是数字类型");)
+            return PLUGIN_NORMAL;
+        }
+        type = j["eventId"].get<int>();
+        if (type != eventTypes::Command && Event::noRegistered(type)) return PLUGIN_NORMAL;
+    } catch (...) {
+        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("Json格式错误：解析json时遇到无法预料的异常");)
+        return PLUGIN_NORMAL;
+    }
+    try {
+        Event::incomingEvent(BaseEventData(std::move(j)), type);
+    } catch (json::type_error &e) {
+        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error("json格式化异常,位置：FUNC_EVENT");
+                                        Logger::logger.error(e.what());
+                                        Logger::logger.error(content);)
+        return PLUGIN_NORMAL;
+    } catch (MiraiCPExceptionBase &e) {
+        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Event::broadcast<MiraiCPExceptionEvent>(MiraiCPExceptionEvent(&e));
+                                        e.raise();)
+        return PLUGIN_NORMAL;
+    } catch (const std::exception &e) {
+        MIRAICP_CRITICAL_NOEXCEPT_BLOCK(Logger::logger.error(e.what());
+                                        Logger::logger.error("info:", content);)
+        return PLUGIN_NORMAL;
+    } catch (...) {
+        return PLUGIN_ERROR;
+    }
+    return PLUGIN_NORMAL;
+}
+/// 获取 Plugin Info
+/// 如果未正确定义，插件无法正确加载
+/// dev: 该函数不可调用loader api；因为会在入口函数调用前先调用，loader api未初始化
+MIRAICP_EXPORT const MiraiCP::PluginConfig *PLUGIN_INFO() {
+    static_assert(std::is_same_v<decltype(&PLUGIN_INFO), LibLoader::plugin_info_func_ptr>);
+    return &MiraiCP::CPPPlugin::config;
+}
+}
+/// utils.cpp END
+/// MiraiCPNewThread.cpp START
+
+#include <sstream>
+namespace MiraiCP {
+    /// 如果在 MiraiCPNewThread 中捕获到了非 MiraiCP 之外的异常抛出
+    /// @see MiraiCPNewThread
+    class MiraiCPThreadException : public MiraiCPExceptionCRTP<MiraiCPThreadException> {
+    public:
+        /// 抛出异常的线程 ID
+        std::thread::id threadId;
+    public:
+        explicit MiraiCPThreadException(const std::string &exception_content, std::thread::id threadId, string _filename, int _lineNum)
+            : MiraiCPExceptionCRTP(exception_content + " at threadId: " + getThreadIdStr(threadId), std::move(_filename), _lineNum),
+              threadId(threadId) {}
+    public:
+        std::string getThreadIdStr() const { return getThreadIdStr(threadId); }
+    public:
+        static string exceptionType() { return "MiraiCPThreadException"; }
+    private:
+        MIRAICP_EXPORT static std::string getThreadIdStr(const std::thread::id &id) {
+            static std::stringstream ss;
+            ss << id;
+            auto result = ss.str();
+            ss.str("");
+            return result;
+        }
+    };
+    void MiraiCPNewThread::threadThrows(const std::string &content) {
+        MiraiCPThreadException exNew(content, std::this_thread::get_id(), MIRAICP_EXCEPTION_WHERE);
+        exNew.raise();
+        Event::broadcast(MiraiCPExceptionEvent(&exNew));
+    }
+    void MiraiCPNewThread::threadExceptionBroadcast(MiraiCPExceptionBase &e) {
+        e.raise();
+        Event::broadcast(MiraiCPExceptionEvent(&e));
     }
 }
-/// MiraiCPStringInternal.cpp END
+/// MiraiCPNewThread.cpp END
 /// redirectCout.cpp START
 
 /// redirectCout.h START
@@ -3239,3 +3140,140 @@ namespace MiraiCP::Redirector {
     }
 }
 /// redirectCout.cpp END
+/// MiraiCPStringInternal.cpp START
+
+#include <cstring>
+namespace MiraiCP {
+    MiraiCPStringview::MiraiCPStringview(const char *char_str) : str(char_str) {
+        if (char_str == nullptr) return;
+        _size = strlen(char_str);
+    }
+    MiraiCPStringview::MiraiCPStringview(const std::string &string_str)
+        : str(string_str.c_str()), _size(string_str.size()) {}
+    MiraiCPStringview::MiraiCPStringview(const MiraiCPString &miraiCPString)
+        : str(miraiCPString.c_str()), _size(miraiCPString.size()) {}
+    void MiraiCPString::construction() {
+        str = (char *) ::std::malloc(sizeof(char) * (_size + 1));
+        if (str == nullptr) {
+            throw std::bad_alloc();
+        }
+    }
+    MiraiCPString::~MiraiCPString() {
+        if (str != nullptr) {
+            free_this(str);
+            str = nullptr;
+        }
+    }
+    MiraiCPString::MiraiCPString(const MiraiCPString &other) {
+        _size = other._size;
+        if (_size == 0) return;
+        construction();
+        assert(str != nullptr);
+        memcpy(str, other.str, _size * sizeof(char));
+        str[_size] = 0;
+    }
+    MiraiCPString::MiraiCPString(MiraiCPString &&temp) noexcept {
+        swap(temp);
+    }
+    MiraiCPString::MiraiCPString(const char *char_str) {
+        if (char_str == nullptr) return;
+        _size = strlen(char_str);
+        if (0 == _size) return;
+        construction();
+        assert(str != nullptr);
+        memcpy(str, char_str, _size * sizeof(char));
+        str[_size] = 0;
+    }
+    MiraiCPString::MiraiCPString(const std::string &string_str) {
+        _size = string_str.size();
+        if (!_size) return;
+        construction();
+        assert(str != nullptr);
+        memcpy(str, string_str.c_str(), _size * sizeof(char));
+        str[_size] = 0;
+    }
+    const char *MiraiCPString::copyToCharPtr() const {
+        if (str == nullptr || _size == 0) return new char[1]{0};
+        char *t = new char[_size + 1];
+        memcpy(t, str, (_size + 1) * sizeof(char));
+        return t;
+    }
+    void MiraiCPString::reserve(size_t inSize) {
+        if (inSize <= _size) return;
+        char *t = (char *) ::std::malloc(sizeof(char) * (inSize + 1));
+        if (t == nullptr) {
+            throw std::bad_alloc();
+        }
+        if (str != nullptr) {
+            memcpy(t, str, _size * sizeof(char));
+            free_this(str);
+        }
+        str = t;
+        _size = inSize;
+        str[_size] = 0;
+        free_this = ::std::free;
+    }
+    bool MiraiCPString::operator==(const MiraiCPString &another) const {
+        return another._size == _size && (_size == 0 || strcmp(another.str, str) == 0);
+    }
+    MiraiCPString &MiraiCPString::operator=(const MiraiCPString &another) {
+        MiraiCPString temp(another);
+        swap(temp);
+        return *this;
+    }
+    MiraiCPString &MiraiCPString::operator=(MiraiCPString &&another) noexcept {
+        swap(another);
+        return *this;
+    }
+    void MiraiCPString::swap(MiraiCPString &other) noexcept {
+        std::swap(str, other.str);
+        std::swap(_size, other._size);
+        std::swap(free_this, other.free_this);
+    }
+}
+/// MiraiCPStringInternal.cpp END
+/// WindowsMin.h START
+#ifndef MIRAICP_PRO_WINDOWSMIN_H
+#define MIRAICP_PRO_WINDOWSMIN_H
+#if MIRAICP_WINDOWS
+#ifndef FULL_WINTARD
+#define WIN32_LEAN_AND_MEAN
+#define NOGDICAPMASKS
+#define NOSYSMETRICS
+#define NOMENUS
+#define NOICONS
+#define NOSYSCOMMANDS
+#define NORASTEROPS
+#define OEMRESOURCE
+#define NOATOM
+#define NOCLIPBOARD
+#define NOCOLOR
+#define NOCTLMGR
+#define NODRAWTEXT
+#define NOKERNEL
+#define NOMEMMGR
+#define NOMETAFILE
+#define NOOPENFILE
+#define NOSCROLL
+#define NOSERVICE
+#define NOSOUND
+#define NOTEXTMETRIC
+#define NOWH
+#define NOCOMM
+#define NOKANJI
+#define NOHELP
+#define NOPROFILER
+#define NODEFERWINDOWPOS
+#define NOMCX
+#define NORPC
+#define NOPROXYSTUB
+#define NOIMAGE
+#define NOTAPE
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+#endif
+/// WindowsMin.h END
