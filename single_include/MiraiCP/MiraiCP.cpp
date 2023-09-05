@@ -20,22 +20,6 @@
 #include "MiraiCP.hpp"
 /// MessageChain.cpp START
 
-/// IllegalArgument.h START
-#ifndef MIRAICP_PRO_EXCEPTION_ILLEGALARGUMENT_H
-#define MIRAICP_PRO_EXCEPTION_ILLEGALARGUMENT_H
-namespace MiraiCP {
-    /// 参数错误
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT IllegalArgumentException : public MiraiCPExceptionCRTP<IllegalArgumentException> {
-    public:
-        explicit IllegalArgumentException(const string &e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(e, std::move(_filename), _lineNum) {
-        }
-        static string exceptionType() { return "IllegalArgumentException"; }
-    };
-}
-#endif
-/// IllegalArgument.h END
-
 /// KtOperation.h START
 #ifndef MIRAICP_PRO_KTOPERATION_H
 #define MIRAICP_PRO_KTOPERATION_H
@@ -147,7 +131,7 @@ namespace MiraiCP::KtOperation {
 #endif
 /// KtOperation.h END
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 namespace MiraiCP {
     using json = nlohmann::json;
     std::string MessageChain::toMiraiCode() const {
@@ -652,7 +636,7 @@ namespace MiraiCP {
 /// LowLevelAPI.cpp END
 /// Command.cpp START
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 #include <mutex>
 namespace MiraiCP {
     namespace CommandManager {
@@ -760,7 +744,7 @@ namespace MiraiCP::Tools {
 /// IMiraiData.h START
 #ifndef MIRAICP_PRO_IMIRAIDATA_H
 #define MIRAICP_PRO_IMIRAIDATA_H
-#include "json_fwd.hpp"
+#include <nlohmann/json_fwd.hpp>
 #include <atomic>
 #include <shared_mutex>
 namespace MiraiCP {
@@ -922,29 +906,9 @@ namespace MiraiCP {
 /// Bot.cpp END
 /// loaderApi.cpp START
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
-namespace MiraiCP {
-    /// 插件没有权限时抛出该异常
-    /// 该异常仅可能在插件尝试调用libLoader 高级权限的Api接口时抛出
-    /// 如插件尝试重载、加载、卸载插件等操作，但配置文件中并没有赋予该插件权限时
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT PluginNotAuthorizedException : public MiraiCPExceptionCRTP<PluginNotAuthorizedException> {
-    public:
-        explicit PluginNotAuthorizedException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.getId() + "没有管理权限", std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "PluginNotAuthorizedException"; }
-    };
-    /// 插件未加载抛出该异常
-    /// 在插件能正常运行时不会抛出，出现该异常事件时请不要再次尝试收发消息等Mirai操作，
-    /// 否则可能导致异常处理时再次抛出异常
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT PluginNotEnabledException : public MiraiCPExceptionCRTP<PluginNotEnabledException> {
-    public:
-        explicit PluginNotEnabledException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("插件" + CPPPlugin::config.getId() + "未加载", std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "PluginNotEnabledException"; }
-    };
-}
 namespace LibLoader::LoaderApi {
     static const interface_funcs *loader_apis = nullptr;
     MIRAICP_EXPORT void set_loader_apis(const LibLoader::LoaderApi::interface_funcs *apis) noexcept {
@@ -1122,117 +1086,7 @@ namespace MiraiCP::ThreadTask::internal {
 /// ThreadTask.cpp END
 /// Exception.cpp START
 
-/// API.h START
-#ifndef MIRAICP_PRO_EXCEPTION_API_H
-#define MIRAICP_PRO_EXCEPTION_API_H
 namespace MiraiCP {
-    /// 内部异常, 通常为json读写问题
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT APIException : public MiraiCPExceptionCRTP<APIException> {
-    public:
-        explicit APIException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("MiraiCP内部无法预料的错误:" + text, std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "APIException"; }
-    };
-}
-#endif
-/// API.h END
-
-/// Member.h START
-#ifndef MIRAICP_PRO_EXCEPTION_MEMBER_H
-#define MIRAICP_PRO_EXCEPTION_MEMBER_H
-namespace MiraiCP {
-    /// 获取群成员错误
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT MemberException : public MiraiCPExceptionCRTP<MemberException> {
-    public:
-        enum MemberExceptionType : int {
-            OtherType,
-            NoSuchGroup,
-            NoSuchMember
-        };
-        MemberExceptionType type = OtherType;
-        /*
-        *   "1" - 找不到群
-        *	"2" - 找不到群成员
-        */
-        explicit MemberException(int _type, string _filename, int _lineNum) : MiraiCPExceptionCRTP(
-                                                                                      [&]() -> string {
-                                                                                          type = MemberExceptionType(_type);
-                                                                                          switch (type) {
-                                                                                              case NoSuchGroup:
-                                                                                                  return "找不到群";
-                                                                                              case NoSuchMember:
-                                                                                                  return "找不到群成员";
-                                                                                              default:
-                                                                                                  return "";
-                                                                                          }
-                                                                                      }(),
-                                                                                      std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "MemberException"; }
-    };
-}
-#endif
-/// Member.h END
-
-/// TimeOut.h START
-#ifndef MIRAICP_PRO_EXCEPTION_TIMEOUT_H
-#define MIRAICP_PRO_EXCEPTION_TIMEOUT_H
-namespace MiraiCP {
-    /// 超时
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT TimeOutException : public MiraiCPExceptionCRTP<TimeOutException> {
-    public:
-        explicit TimeOutException(const std::string &e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(e, std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "TimeOutException"; }
-    };
-}
-#endif
-/// TimeOut.h END
-
-namespace MiraiCP {
-    /// 机器人操作异常
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT BotException : public MiraiCPExceptionCRTP<BotException> {
-    public:
-        explicit BotException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("没有权限执行该操作", std::move(_filename), _lineNum) {}
-        explicit BotException(const string &d, string _filename, int _lineNum) : MiraiCPExceptionCRTP(d, std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "BotException"; }
-    };
-    /// 被禁言异常, 通常发生于发送信息
-    class MIRAICP_EXPORT BotIsBeingMutedException : public MiraiCPExceptionCRTP<BotIsBeingMutedException> {
-    public:
-        /// 剩余禁言时间, 单位秒
-        int timeRemain;
-    public:
-        explicit BotIsBeingMutedException(int t, string _filename, int _lineNum) : MiraiCPExceptionCRTP(
-                                                                                           "发送信息失败, bot已被禁言, 剩余时间" + std::to_string(t), std::move(_filename), _lineNum),
-                                                                                   timeRemain(t) {}
-        static string exceptionType() { return "BotIsBeingMutedException"; }
-    };
-    /// 事件被取消, 一般出现在发送消息时在preSendMessageEvent取消的时候抛出
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT EventCancelledException : public MiraiCPExceptionCRTP<EventCancelledException> {
-    public:
-        explicit EventCancelledException(const string &msg, string _filename, int _lineNum) : MiraiCPExceptionCRTP(msg, std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "EventCancelledException"; }
-    };
-    /// 获取群成员错误
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT FriendException : public MiraiCPExceptionCRTP<FriendException> {
-    public:
-        /*
-        *   找不到好友
-        */
-        FriendException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("找不到好友", std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "FriendException"; }
-    };
-    /// 获取群错误
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT GroupException : public MiraiCPExceptionCRTP<GroupException> {
-    public:
-        GroupException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("找不到群", std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "GroupException"; }
-    };
     void MiraiCPExceptionBase::basicRaise() const {
         Logger::logger.error(this->what());
     }
@@ -1248,40 +1102,25 @@ namespace MiraiCP {
         if (re == "EG")
             throw GroupException(name, line);
         if (re == "EM")
-            throw MemberException(1, name, line);
+            throw MemberGroupNotFoundException(name, line);
         if (re == "EMM")
-            throw MemberException(2, name, line);
+            throw MemberNotFoundException(name, line);
         if (re == "EB")
-            throw BotException("找不到bot:" + re, name, line);
+            throw BotNotFoundException(re, name, line);
         if (re == "EA")
             throw APIException(ErrorMsg, name, line);
         if (re == "EC")
-            throw EventCancelledException("发送信息被取消", name, line);
+            throw EventCancelledException(name, line);
         if (re == "ET")
             throw TimeOutException("发送信息超时", name, line);
         if (re == "EP")
-            throw BotException(name, line);
+            throw BotPermException(name, line);
         if (re.rfind("EBM", 0) == 0)
             throw BotIsBeingMutedException(std::stoi(re.substr(3)), name, line);
     }
 }
 /// Exception.cpp END
 /// SingleMessage.cpp START
-
-/// RemoteAsset.h START
-#ifndef MIRAICP_PRO_EXCEPTION_REMOTEASSET_H
-#define MIRAICP_PRO_EXCEPTION_REMOTEASSET_H
-namespace MiraiCP {
-    /// 远程资源出现问题
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT RemoteAssetException : public MiraiCPExceptionCRTP<RemoteAssetException> {
-    public:
-        explicit RemoteAssetException(const string &e, string _filename, int _lineNum) : MiraiCPExceptionCRTP(e, std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "RemoteAssetException"; }
-    };
-}
-#endif
-/// RemoteAsset.h END
 
 namespace MiraiCP {
     using json = nlohmann::json;
@@ -1668,7 +1507,7 @@ namespace MiraiCP {
 /// SingleMessage.cpp END
 /// KtOperation.cpp START
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 namespace MiraiCP::KtOperation {
     std::string ktOperation(operation_set type, const nlohmann::json& data, bool catchErr, const std::string &errorInfo) {
         return ktOperationStr(type, data.dump(), catchErr, errorInfo);
@@ -1700,21 +1539,6 @@ namespace MiraiCP {
 }
 #endif
 /// GroupRelatedData.h END
-
-/// Upload.h START
-#ifndef MIRAICP_PRO_EXCEPTION_UPLOAD_H
-#define MIRAICP_PRO_EXCEPTION_UPLOAD_H
-namespace MiraiCP {
-    /// 文件读取异常.
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT UploadException : public MiraiCPExceptionCRTP<UploadException> {
-    public:
-        explicit UploadException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("上传(图片/文件)异常" + text, std::move(_filename), _lineNum) {}
-        static std::string exceptionType() { return "UploadException"; }
-    };
-}
-#endif
-/// Upload.h END
 
 namespace MiraiCP {
     using json = nlohmann::json;
@@ -1850,21 +1674,6 @@ namespace MiraiCP {
 }
 /// Contact.cpp END
 /// Group.cpp START
-
-/// IllegalState.h START
-#ifndef MIRAICP_PRO_EXCEPTION_ILLEGALSTATE_H
-#define MIRAICP_PRO_EXCEPTION_ILLEGALSTATE_H
-namespace MiraiCP {
-    /// 通常为Mirai返回
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT IllegalStateException : public MiraiCPExceptionCRTP<IllegalStateException> {
-    public:
-        explicit IllegalStateException(const std::string &text, string _filename, int _lineNum) : MiraiCPExceptionCRTP("状态异常:" + text, std::move(_filename), _lineNum) {}
-        static std::string exceptionType() { return "IllegalStateException"; }
-    };
-}
-#endif
-/// IllegalState.h END
 
 namespace MiraiCP {
 #define LOC_CLASS_NAMESPACE Group
@@ -2171,16 +1980,9 @@ namespace MiraiCP {
 /// Friend.cpp END
 /// MessageSource.cpp START
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 namespace MiraiCP {
     using json = nlohmann::json;
-    /// 撤回异常
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT RecallException : public MiraiCPExceptionCRTP<RecallException> {
-    public:
-        RecallException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("该消息已经被撤回", std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "RecallException"; }
-    };
     void MessageSource::recall() const {
         std::string re = KtOperation::ktOperationStr(KtOperation::Recall, serializeToString());
         if (re == "E2") throw RecallException(MIRAICP_EXCEPTION_WHERE);
@@ -2239,16 +2041,6 @@ namespace MiraiCP {
         void refreshInfo() override;
     };
     using json = nlohmann::json;
-    /// 禁言异常
-    /// @see MiraiCPExceptionBase
-    class MIRAICP_EXPORT MuteException : public MiraiCPExceptionCRTP<MuteException> {
-    public:
-        /*
-        *	 禁言时间超出0s~30d
-        */
-        MuteException(string _filename, int _lineNum) : MiraiCPExceptionCRTP("禁言时长不在0s~30d中间", std::move(_filename), _lineNum) {}
-        static string exceptionType() { return "MuteException"; }
-    };
     auto GetMemberFromPool(QQID id, QQID groupId, QQID botid) noexcept {
         using Tools::idpair;
         static std::unordered_map<idpair, std::unordered_map<QQID, std::shared_ptr<Member::DataType>>> Pool;
@@ -2331,9 +2123,9 @@ namespace MiraiCP {
         if (_anonymous) return;
         std::string result = LowLevelAPI::getInfoSource(internalToJson());
         if (result == "E1")
-            throw MemberException(1, MIRAICP_EXCEPTION_WHERE);
+            throw MemberGroupNotFoundException(MIRAICP_EXCEPTION_WHERE);
         if (result == "E2")
-            throw MemberException(2, MIRAICP_EXCEPTION_WHERE);
+            throw MemberNotFoundException(MIRAICP_EXCEPTION_WHERE);
         {
             LowLevelAPI::info tmp = LowLevelAPI::info0(result);
             this->_nickOrNameCard = tmp.nickOrNameCard;
@@ -2458,9 +2250,9 @@ namespace MiraiCP {
     }
     MemberJoinEvent::MemberJoinEvent(BaseEventData j) : BotEvent(j.botId),
                                                         type(joinType(j.eventData["eventType"].get<int>())),
-                                                        member(j.object->id, j.subject->groupId, j.botId),
+                                                        member(j.object->id, j.object->groupId, j.object->botId),
                                                         group(j.subject->id, j.subject->botId),
-                                                        inviter(j.object == std::nullopt ? std::nullopt : std::optional(Member(j.object->id, j.object->groupId, j.object->botId))) {
+                                                        inviter(!j.eventData.contains("invitor") ? std::nullopt : std::optional(Member(j.eventData["invitor"]["id"], j.eventData["invitor"]["groupId"], j.eventData["invitor"]["botId"]))) {
     }
     MemberLeaveEvent::MemberLeaveEvent(BaseEventData j) : BotEvent(j.botId),
                                                           member(j.object->id, j.object->groupId, j.object->botId),
@@ -2663,6 +2455,13 @@ namespace MiraiCP {
         }
         this->eventData = json_jsonmover(j, "eventData");
     }
+    std::string BaseEventData::toString() const {
+        std::stringstream ss;
+        ss << "{"
+           << "botId=" << botId << ", subject=" << subject->toString() << ", object=" << object->toString()
+           << ", eventData=" << eventData.dump() << "}";
+        return ss.str();
+    }
     BaseEventData::BuiltInContact::BuiltInContact(nlohmann::json in_json) {
         if (in_json.empty()) {
             return;
@@ -2672,6 +2471,12 @@ namespace MiraiCP {
         if (in_json.contains("groupId"))
             this->groupId = in_json["groupId"];
         this->type = ContactType(in_json["type"]);
+    }
+    std::string BaseEventData::BuiltInContact::toString() const {
+        std::stringstream ss;
+        ss << "{"
+           << "botId=" << botId << ", id=" << id << ", groupId=" << groupId << ", type=" << type << "}";
+        return ss.str();
     }
     std::shared_ptr<Contact> BaseEventData::BuiltInContact::toContactPointer() {
         switch (this->type) {
@@ -2719,7 +2524,7 @@ void MiraiCP::schedule(std::chrono::seconds sec, const std::string &msg) {
 /// Schedule.cpp END
 /// IMiraiData.cpp START
 
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include <mutex>
 namespace MiraiCP {
     void IMiraiData::requestRefresh() {
@@ -2744,7 +2549,7 @@ namespace MiraiCP {
 /// IMiraiData.cpp END
 /// ForwardedMessage.cpp START
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 namespace MiraiCP {
     using json = nlohmann::json;
     ForwardedNode::ForwardedNode(QQID id, std::string name, ForwardedMessage _message, int t)
@@ -2970,29 +2775,6 @@ MIRAICP_EXPORT const MiraiCP::PluginConfig *PLUGIN_INFO() {
 
 #include <sstream>
 namespace MiraiCP {
-    /// 如果在 MiraiCPNewThread 中捕获到了非 MiraiCP 之外的异常抛出
-    /// @see MiraiCPNewThread
-    class MiraiCPThreadException : public MiraiCPExceptionCRTP<MiraiCPThreadException> {
-    public:
-        /// 抛出异常的线程 ID
-        std::thread::id threadId;
-    public:
-        explicit MiraiCPThreadException(const std::string &exception_content, std::thread::id threadId, string _filename, int _lineNum)
-            : MiraiCPExceptionCRTP(exception_content + " at threadId: " + getThreadIdStr(threadId), std::move(_filename), _lineNum),
-              threadId(threadId) {}
-    public:
-        std::string getThreadIdStr() const { return getThreadIdStr(threadId); }
-    public:
-        static string exceptionType() { return "MiraiCPThreadException"; }
-    private:
-        MIRAICP_EXPORT static std::string getThreadIdStr(const std::thread::id &id) {
-            static std::stringstream ss;
-            ss << id;
-            auto result = ss.str();
-            ss.str("");
-            return result;
-        }
-    };
     void MiraiCPNewThread::threadThrows(const std::string &content) {
         MiraiCPThreadException exNew(content, std::this_thread::get_id(), MIRAICP_EXCEPTION_WHERE);
         exNew.raise();
