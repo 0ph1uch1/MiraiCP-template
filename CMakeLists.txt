@@ -19,6 +19,7 @@ set(
         ${CMAKE_CURRENT_SOURCE_DIR}/single_include/3rd_include/json/nlohmann
         ${CMAKE_CURRENT_SOURCE_DIR}/single_include/3rd_include/utf8
         ${CMAKE_CURRENT_SOURCE_DIR}/single_include/3rd_include/utf8/utf8
+        ${CMAKE_CURRENT_SOURCE_DIR}/single_include/3rd_include/polym
         ${CMAKE_CURRENT_SOURCE_DIR}/single_include/MiraiCP
 )
 
